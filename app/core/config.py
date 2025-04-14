@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     AWS_BUCKET_NAME: str = os.getenv("AWS_BUCKET_NAME", "lostpets-images")
 
     # Similarity threshold for pet matching
-    SIMILARITY_THRESHOLD: float = 0.5
+    SIMILARITY_THRESHOLD: float = 0.35  # Снижено с 0.5 для более широкого охвата
 
     # Email verification settings
     VERIFICATION_CODE_EXPIRE_MINUTES: int = 15

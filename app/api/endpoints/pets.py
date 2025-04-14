@@ -402,14 +402,16 @@ async def search_pets(
 
     # Фильтруем по обязательным критериям
     query = query.filter(Pet.species == species)
-    query = query.filter(Pet.color == color)
+
+    # Используем LIKE для более гибкого поиска по цвету
+    query = query.filter(Pet.color.ilike(f"%{color}%"))
 
     # Фильтруем по опциональным критериям, если они предоставлены
     if gender:
         query = query.filter(Pet.gender == gender)
 
     if breed:
-        query = query.filter(Pet.breed == breed)
+        query = query.filter(Pet.breed.ilike(f"%{breed}%"))
 
     # Получаем отфильтрованных питомцев с их фотографиями
     potential_matches = query.options(joinedload(Pet.photos)).all()
@@ -418,10 +420,15 @@ async def search_pets(
 
     # Если нет потенциальных совпадений, возвращаем пустой список
     if not potential_matches:
+        # После использования удаляем временную фотографию
+        s3_client.delete_file(found_pet_photo_url)
         return {"matches": []}
 
     # Для каждого питомца вычисляем оценку сходства с загруженным фото
     similarity_results = []
+
+    # Используем более низкий порог сходства для более широкого охвата
+    similarity_threshold = 0.35  # Ниже стандартного порога в 0.5
 
     for pet in potential_matches:
         # Берем первичное фото питомца, если есть
@@ -435,18 +442,24 @@ async def search_pets(
         pet_photo_url = pet_photos[0].photo_url
 
         # Вычисляем оценку сходства
-        similarity_score = similarity_service.compute_similarity(
-            found_pet_photo_url, pet_photo_url
-        )
-
-        # Добавляем результат, если оценка выше порогового значения
-        if similarity_score >= settings.SIMILARITY_THRESHOLD:
-            similarity_results.append(
-                SimilarityResult(
-                    pet=pet,
-                    similarity_score=similarity_score
-                )
+        try:
+            similarity_score = similarity_service.compute_similarity(
+                found_pet_photo_url, pet_photo_url
             )
+
+            logger.info(f"Pet ID {pet.id}, similarity score: {similarity_score}")
+
+            # Добавляем результат, если оценка выше порогового значения
+            if similarity_score >= similarity_threshold:
+                similarity_results.append(
+                    SimilarityResult(
+                        pet=pet,
+                        similarity_score=similarity_score
+                    )
+                )
+        except Exception as e:
+            logger.error(f"Error computing similarity for pet {pet.id}: {e}")
+            continue
 
     # Сортируем результаты по убыванию оценки сходства
     similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)

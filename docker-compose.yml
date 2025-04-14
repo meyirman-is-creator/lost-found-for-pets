@@ -11,6 +11,9 @@ services:
       - db
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/lostpets_db
+      - DOCKER_ENV=true
     volumes:
       - ./app:/app/app
     networks:
