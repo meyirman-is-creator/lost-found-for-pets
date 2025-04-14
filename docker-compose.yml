@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: lostpets_api
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app
+    networks:
+      - lostpets-network
+
+  db:
+    image: postgres:14
+    container_name: lostpets_db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=lostpets_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lostpets-network
+
+networks:
+  lostpets-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
