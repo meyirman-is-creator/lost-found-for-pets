@@ -1,19 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
 from datetime import datetime
 import json
 
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
-from app.models.models import Pet, PetStatus, User
+from app.models.models import Pet, PetStatus, User, PetPhoto
 from app.schemas.schemas import (
     Pet as PetSchema,
     PetCreate,
     PetUpdate,
     FoundPetInfo,
     SimilarityResponse,
-    SimilarityResult
+    SimilarityResult,
+    PetPhoto as PetPhotoSchema
 )
 from app.services.aws.s3 import s3_client
 from app.services.cv.similarity import similarity_service
@@ -36,7 +37,13 @@ def get_lost_pets(
     if species:
         query = query.filter(Pet.species == species)
 
-    pets = query.order_by(Pet.lost_date.desc()).offset(skip).limit(limit).all()
+    # Используем joinedload для подгрузки фотографий питомцев
+    pets = (query
+            .options(joinedload(Pet.photos))
+            .order_by(Pet.lost_date.desc())
+            .offset(skip)
+            .limit(limit)
+            .all())
     return pets
 
 
@@ -48,7 +55,10 @@ def get_lost_pet(
     """
     Get details of a specific lost pet
     """
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.status == PetStatus.LOST).first()
+    pet = (db.query(Pet)
+           .filter(Pet.id == pet_id, Pet.status == PetStatus.LOST)
+           .options(joinedload(Pet.photos))
+           .first())
     if not pet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -65,7 +75,10 @@ def get_my_pets(
     """
     Get list of current user's pets
     """
-    pets = db.query(Pet).filter(Pet.owner_id == current_user.id).all()
+    pets = (db.query(Pet)
+            .filter(Pet.owner_id == current_user.id)
+            .options(joinedload(Pet.photos))
+            .all())
     return pets
 
 
@@ -78,24 +91,14 @@ async def create_pet(
         color: Optional[str] = Form(None),
         gender: Optional[str] = Form(None),
         distinctive_features: Optional[str] = Form(None),
-        photo: UploadFile = File(...),
+        photos: List[UploadFile] = File(...),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
     """
-    Create a new pet
+    Create a new pet with multiple photos
     """
-    # Upload photo to S3
-    file_content = await photo.read()
-    photo_url = s3_client.upload_file(file_content, f"{current_user.id}_{datetime.now().timestamp()}_{photo.filename}")
-
-    if not photo_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload photo"
-        )
-
-    # Create pet
+    # Create pet without photos first
     db_pet = Pet(
         name=name,
         species=species,
@@ -104,12 +107,40 @@ async def create_pet(
         color=color,
         gender=gender,
         distinctive_features=distinctive_features,
-        photo_url=photo_url,
         status=PetStatus.HOME,
         owner_id=current_user.id
     )
 
     db.add(db_pet)
+    db.commit()
+    db.refresh(db_pet)
+
+    # Process and upload photos
+    primary_photo_set = False
+    for i, photo in enumerate(photos):
+        file_content = await photo.read()
+        photo_url = s3_client.upload_file(
+            file_content,
+            f"{current_user.id}_{db_pet.id}_{datetime.now().timestamp()}_{photo.filename}"
+        )
+
+        if not photo_url:
+            # If photo upload fails, continue with next photo
+            continue
+
+        # First photo is set as primary by default
+        is_primary = (i == 0) or not primary_photo_set
+        if is_primary:
+            primary_photo_set = True
+
+        # Create photo record
+        db_photo = PetPhoto(
+            pet_id=db_pet.id,
+            photo_url=photo_url,
+            is_primary=is_primary
+        )
+        db.add(db_photo)
+
     db.commit()
     db.refresh(db_pet)
 
@@ -126,7 +157,10 @@ def update_pet(
     """
     Update pet information
     """
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
+    pet = (db.query(Pet)
+           .filter(Pet.id == pet_id, Pet.owner_id == current_user.id)
+           .options(joinedload(Pet.photos))
+           .first())
     if not pet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -151,15 +185,16 @@ def update_pet(
     return pet
 
 
-@router.post("/upload-photo/{pet_id}", response_model=PetSchema)
-async def upload_pet_photo(
+@router.post("/{pet_id}/photos", response_model=List[PetPhotoSchema])
+async def add_pet_photos(
         pet_id: int,
-        photo: UploadFile = File(...),
+        photos: List[UploadFile] = File(...),
+        set_primary: bool = Query(False, description="Set first uploaded photo as primary"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
     """
-    Upload a new photo for a pet
+    Add new photos to an existing pet
     """
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
@@ -168,23 +203,135 @@ async def upload_pet_photo(
             detail="Pet not found"
         )
 
-    # Upload photo to S3
-    file_content = await photo.read()
-    photo_url = s3_client.upload_file(file_content, f"{current_user.id}_{datetime.now().timestamp()}_{photo.filename}")
+    # Check if there are any existing photos to determine if we need to set primary
+    existing_photos = db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).all()
+    has_primary = any(photo.is_primary for photo in existing_photos)
 
-    if not photo_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload photo"
+    # Process and upload photos
+    uploaded_photos = []
+    for i, photo in enumerate(photos):
+        file_content = await photo.read()
+        photo_url = s3_client.upload_file(
+            file_content,
+            f"{current_user.id}_{pet_id}_{datetime.now().timestamp()}_{photo.filename}"
         )
 
-    # Update pet photo URL
-    pet.photo_url = photo_url
-    db.add(pet)
-    db.commit()
-    db.refresh(pet)
+        if not photo_url:
+            # If photo upload fails, continue with next photo
+            continue
 
-    return pet
+        # Set as primary if requested or if no primary exists
+        is_primary = (i == 0 and set_primary) or (i == 0 and not has_primary)
+
+        # If we're setting a new primary, unset all others
+        if is_primary:
+            db.query(PetPhoto).filter(
+                PetPhoto.pet_id == pet_id,
+                PetPhoto.is_primary == True
+            ).update({"is_primary": False})
+
+        # Create photo record
+        db_photo = PetPhoto(
+            pet_id=pet_id,
+            photo_url=photo_url,
+            is_primary=is_primary
+        )
+        db.add(db_photo)
+        uploaded_photos.append(db_photo)
+
+    db.commit()
+
+    # Refresh all photos to get their IDs
+    for photo in uploaded_photos:
+        db.refresh(photo)
+
+    return uploaded_photos
+
+
+@router.patch("/{pet_id}/photos/{photo_id}/set-primary", response_model=PetPhotoSchema)
+def set_primary_photo(
+        pet_id: int,
+        photo_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_verified_user)
+) -> Any:
+    """
+    Set a specific photo as the primary photo for a pet
+    """
+    # Verify the pet belongs to the current user
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
+    if not pet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet not found"
+        )
+
+    # Get the photo to set as primary
+    photo = db.query(PetPhoto).filter(PetPhoto.id == photo_id, PetPhoto.pet_id == pet_id).first()
+    if not photo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Photo not found"
+        )
+
+    # Set all photos as non-primary
+    db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).update({"is_primary": False})
+
+    # Set the selected photo as primary
+    photo.is_primary = True
+    db.add(photo)
+    db.commit()
+    db.refresh(photo)
+
+    return photo
+
+
+@router.delete("/{pet_id}/photos/{photo_id}", response_model=dict)
+def delete_pet_photo(
+        pet_id: int,
+        photo_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_verified_user)
+) -> Any:
+    """
+    Delete a pet photo
+    """
+    # Verify the pet belongs to the current user
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
+    if not pet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet not found"
+        )
+
+    # Get the photo to delete
+    photo = db.query(PetPhoto).filter(PetPhoto.id == photo_id, PetPhoto.pet_id == pet_id).first()
+    if not photo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Photo not found"
+        )
+
+    # If this is the primary photo, find another photo to set as primary
+    if photo.is_primary:
+        next_photo = db.query(PetPhoto).filter(
+            PetPhoto.pet_id == pet_id,
+            PetPhoto.id != photo_id
+        ).first()
+
+        if next_photo:
+            next_photo.is_primary = True
+            db.add(next_photo)
+
+    # Try to delete from S3 first
+    if photo.photo_url:
+        s3_client.delete_file(photo.photo_url)
+
+    # Delete from database
+    db.delete(photo)
+    db.commit()
+
+    return {"message": "Photo deleted successfully"}
 
 
 @router.delete("/{pet_id}", response_model=dict)
@@ -194,7 +341,7 @@ def delete_pet(
         current_user: User = Depends(get_verified_user)
 ) -> Any:
     """
-    Delete a pet
+    Delete a pet and all its photos
     """
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
@@ -203,72 +350,16 @@ def delete_pet(
             detail="Pet not found"
         )
 
+    # Get all photos to delete from S3
+    photos = db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).all()
+
+    # Delete photos from S3
+    for photo in photos:
+        if photo.photo_url:
+            s3_client.delete_file(photo.photo_url)
+
+    # The pet and its photos will be deleted from the database (cascade delete)
     db.delete(pet)
     db.commit()
 
     return {"message": "Pet deleted successfully"}
-
-
-@router.post("/search", response_model=SimilarityResponse)
-async def search_similar_pets(
-        pet_info: FoundPetInfo,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-) -> Any:
-    """
-    Search for similar pets based on uploaded photo
-    """
-    # Upload photo to S3
-    photo_url = s3_client.upload_base64_image(
-        pet_info.photo_base64,
-        f"found_{current_user.id}_{datetime.now().timestamp()}.jpg"
-    )
-
-    if not photo_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload photo"
-        )
-
-    # Get lost pets matching the species
-    query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
-
-    if pet_info.species:
-        query = query.filter(Pet.species == pet_info.species)
-
-    lost_pets = query.all()
-
-    # Calculate similarity for each lost pet
-    matches = []
-    for pet in lost_pets:
-        similarity = similarity_service.compute_similarity(photo_url, pet.photo_url)
-        matches.append({"pet": pet, "similarity_score": similarity})
-
-    # Sort by similarity score (descending) and keep only significant matches
-    matches.sort(key=lambda x: x["similarity_score"], reverse=True)
-    significant_matches = [match for match in matches if match["similarity_score"] > 0.3]
-
-    # Create a found pet entry for future reference
-    found_pet = Pet(
-        name="Found Pet",
-        species=pet_info.species,
-        breed=pet_info.breed,
-        color=pet_info.color,
-        distinctive_features=pet_info.distinctive_features,
-        photo_url=photo_url,
-        status=PetStatus.FOUND,
-        last_seen_location=pet_info.location,
-        owner_id=current_user.id
-    )
-
-    db.add(found_pet)
-    db.commit()
-    db.refresh(found_pet)
-
-    # Return top matches
-    return SimilarityResponse(
-        matches=[
-            SimilarityResult(pet=match["pet"], similarity_score=match["similarity_score"])
-            for match in significant_matches
-        ]
-    )

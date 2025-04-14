@@ -44,6 +44,26 @@ class User(UserBase):
         from_attributes = True
 
 
+# ----- Pet Photo Schemas -----
+
+class PetPhotoBase(BaseModel):
+    is_primary: bool = False
+
+
+class PetPhotoCreate(PetPhotoBase):
+    pass
+
+
+class PetPhoto(PetPhotoBase):
+    id: int
+    pet_id: int
+    photo_url: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ----- Pet Schemas -----
 
 class PetBase(BaseModel):
@@ -74,7 +94,7 @@ class PetUpdate(BaseModel):
 
 class Pet(PetBase):
     id: int
-    photo_url: str
+    photos: List[PetPhoto] = []
     status: PetStatus
     created_at: datetime
     updated_at: datetime
@@ -102,7 +122,7 @@ class PetMatch(PetMatchBase):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PetMatchWithDetails(PetMatch):
@@ -110,7 +130,7 @@ class PetMatchWithDetails(PetMatch):
     found_pet: Pet
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ----- Notification Schemas -----
@@ -132,7 +152,7 @@ class Notification(NotificationBase):
     match: PetMatch
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ----- Authentication Schemas -----
@@ -174,11 +194,11 @@ class SimilarityResult(BaseModel):
     similarity_score: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class SimilarityResponse(BaseModel):
     matches: List[SimilarityResult]
 
     class Config:
-        orm_mode = True
+        from_attributes = True

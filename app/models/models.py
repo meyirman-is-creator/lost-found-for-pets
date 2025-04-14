@@ -43,7 +43,6 @@ class Pet(Base):
     color = Column(String)
     gender = Column(String)
     distinctive_features = Column(Text, nullable=True)
-    photo_url = Column(String)
     status = Column(Enum(PetStatus), default=PetStatus.HOME)
     last_seen_location = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
@@ -53,8 +52,22 @@ class Pet(Base):
 
     # Отношения
     owner = relationship("User", back_populates="pets")
+    photos = relationship("PetPhoto", back_populates="pet", cascade="all, delete-orphan")
     matches = relationship("PetMatch", foreign_keys="[PetMatch.found_pet_id]", back_populates="found_pet")
     lost_matches = relationship("PetMatch", foreign_keys="[PetMatch.lost_pet_id]", back_populates="lost_pet")
+
+
+class PetPhoto(Base):
+    __tablename__ = "pet_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pet_id = Column(Integer, ForeignKey("pets.id"), nullable=False)
+    photo_url = Column(String, nullable=False)
+    is_primary = Column(Boolean, default=False)  # Флаг для главной фотографии
+    created_at = Column(DateTime, default=func.now())
+
+    # Отношения
+    pet = relationship("Pet", back_populates="photos")
 
 
 class PetMatch(Base):

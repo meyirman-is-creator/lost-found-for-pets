@@ -24,6 +24,10 @@ class S3Client:
         if file_name is None:
             file_name = f"{uuid.uuid4()}.jpg"
 
+        # Если file_obj это байты, преобразуем их в файловый объект
+        if isinstance(file_obj, bytes):
+            file_obj = BytesIO(file_obj)
+
         try:
             self.s3.upload_fileobj(
                 file_obj,
