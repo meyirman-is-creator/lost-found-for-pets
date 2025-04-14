@@ -12,7 +12,7 @@ from app.core.security import (
 )
 from app.db.database import get_db
 from app.models.models import User, VerificationCode
-from app.schemas.schemas import UserCreate, Token, VerificationRequest
+from app.schemas.schemas import UserCreate, Token, VerificationRequest, Login
 from app.services.email_service import email_service
 from typing import Any
 from datetime import datetime
@@ -109,12 +109,12 @@ def verify_email(verification_data: VerificationRequest, db: Session = Depends(g
 
 
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> Any:
+def login(login_data: Login, db: Session = Depends(get_db)) -> Any:
     """
-    OAuth2 compatible token login, get an access token for future requests
+    Login with email and password, get an access token for future requests
     """
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    user = db.query(User).filter(User.email == login_data.email).first()
+    if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

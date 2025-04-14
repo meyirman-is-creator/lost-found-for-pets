@@ -9,6 +9,7 @@ from app.schemas.schemas import TokenData
 from app.core.security import pwd_context
 from typing import Optional
 
+# Обновляем путь к endpoint для авторизации
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 

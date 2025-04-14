@@ -3,8 +3,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
 import logging
+from email.header import Header
+from email import charset
 
 logger = logging.getLogger(__name__)
+
+# Настраиваем правильную кодировку для email
+charset.add_charset('utf-8', charset.SHORTEST, charset.QP, 'utf-8')
 
 
 class EmailService:
@@ -24,6 +29,7 @@ class EmailService:
         html_content = f"""
         <html>
         <head>
+            <meta charset="utf-8">
             <style>
                 body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }}
                 .container {{ max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 5px; }}
@@ -55,18 +61,25 @@ class EmailService:
 
         try:
             msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
+            # Используем Header для правильной кодировки темы письма
+            msg['Subject'] = Header(subject, 'utf-8')
             msg['From'] = self.sender
             msg['To'] = to_email
 
-            html_part = MIMEText(html_content, 'html')
+            # Явно указываем кодировку UTF-8 для содержимого письма
+            html_part = MIMEText(html_content, 'html', _charset='utf-8')
             msg.attach(html_part)
+
+            # Добавляем логирование для отладки
+            logger.info(f"Attempting to send email to {to_email} using server {self.server}:{self.port}")
+            logger.info(f"Using SMTP username: {self.username}")
 
             with smtplib.SMTP(self.server, self.port) as server:
                 server.starttls()
                 server.login(self.username, self.password)
                 server.send_message(msg)
 
+            logger.info(f"Email successfully sent to {to_email}")
             return True
         except Exception as e:
             logger.error(f"Failed to send verification email: {e}")
@@ -83,6 +96,7 @@ class EmailService:
         html_content = f"""
         <html>
         <head>
+            <meta charset="utf-8">
             <style>
                 body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }}
                 .container {{ max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 5px; }}
@@ -115,11 +129,13 @@ class EmailService:
 
         try:
             msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
+            # Используем Header для правильной кодировки темы письма
+            msg['Subject'] = Header(subject, 'utf-8')
             msg['From'] = self.sender
             msg['To'] = to_email
 
-            html_part = MIMEText(html_content, 'html')
+            # Явно указываем кодировку UTF-8 для содержимого письма
+            html_part = MIMEText(html_content, 'html', _charset='utf-8')
             msg.attach(html_part)
 
             with smtplib.SMTP(self.server, self.port) as server:
