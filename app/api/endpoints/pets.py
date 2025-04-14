@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
 from datetime import datetime
 import json
+import logging
 
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
@@ -18,8 +19,10 @@ from app.schemas.schemas import (
 )
 from app.services.aws.s3 import s3_client
 from app.services.cv.similarity import similarity_service
+from app.core.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/lost", response_model=List[PetSchema])
@@ -363,3 +366,92 @@ def delete_pet(
     db.commit()
 
     return {"message": "Pet deleted successfully"}
+
+
+@router.post("/search", response_model=SimilarityResponse)
+async def search_pets(
+        photo: UploadFile = File(...),
+        species: str = Form(...),
+        color: str = Form(...),
+        gender: Optional[str] = Form(None),
+        breed: Optional[str] = Form(None),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_verified_user)
+) -> Any:
+    """
+    Search for lost pets that match the provided criteria and compare the photo
+    using computer vision algorithms
+    """
+    # Читаем содержимое загруженного файла
+    photo_content = await photo.read()
+
+    # Загружаем фото в S3 для временного хранения
+    found_pet_photo_url = s3_client.upload_file(
+        photo_content,
+        f"found_pets/{current_user.id}_{datetime.now().timestamp()}_{photo.filename}"
+    )
+
+    if not found_pet_photo_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload photo"
+        )
+
+    # Создаем базовый запрос для поиска потерянных питомцев
+    query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
+
+    # Фильтруем по обязательным критериям
+    query = query.filter(Pet.species == species)
+    query = query.filter(Pet.color == color)
+
+    # Фильтруем по опциональным критериям, если они предоставлены
+    if gender:
+        query = query.filter(Pet.gender == gender)
+
+    if breed:
+        query = query.filter(Pet.breed == breed)
+
+    # Получаем отфильтрованных питомцев с их фотографиями
+    potential_matches = query.options(joinedload(Pet.photos)).all()
+
+    logger.info(f"Found {len(potential_matches)} potential matches after filtering")
+
+    # Если нет потенциальных совпадений, возвращаем пустой список
+    if not potential_matches:
+        return {"matches": []}
+
+    # Для каждого питомца вычисляем оценку сходства с загруженным фото
+    similarity_results = []
+
+    for pet in potential_matches:
+        # Берем первичное фото питомца, если есть
+        pet_photos = [photo for photo in pet.photos if photo.is_primary]
+        if not pet_photos and pet.photos:
+            pet_photos = [pet.photos[0]]
+
+        if not pet_photos:
+            continue
+
+        pet_photo_url = pet_photos[0].photo_url
+
+        # Вычисляем оценку сходства
+        similarity_score = similarity_service.compute_similarity(
+            found_pet_photo_url, pet_photo_url
+        )
+
+        # Добавляем результат, если оценка выше порогового значения
+        if similarity_score >= settings.SIMILARITY_THRESHOLD:
+            similarity_results.append(
+                SimilarityResult(
+                    pet=pet,
+                    similarity_score=similarity_score
+                )
+            )
+
+    # Сортируем результаты по убыванию оценки сходства
+    similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)
+
+    # После использования удаляем временную фотографию
+    s3_client.delete_file(found_pet_photo_url)
+
+    return {"matches": similarity_results}
