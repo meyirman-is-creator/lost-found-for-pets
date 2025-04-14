@@ -34,8 +34,7 @@ class S3Client:
                 self.bucket_name,
                 file_name,
                 ExtraArgs={
-                    "ContentType": content_type,
-                    "ACL": "public-read"
+                    "ContentType": content_type
                 }
             )
             return f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_name}"
