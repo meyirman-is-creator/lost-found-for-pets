@@ -202,3 +202,67 @@ class SimilarityResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ----- Chat Schemas -----
+
+class ChatMessageBase(BaseModel):
+    content: str
+
+
+class ChatMessageCreate(ChatMessageBase):
+    pass
+
+
+class ChatMessage(ChatMessageBase):
+    id: int
+    chat_id: int
+    sender_id: int
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatBase(BaseModel):
+    pet_id: Optional[int] = None
+
+
+class ChatCreate(ChatBase):
+    user2_id: int
+
+
+class Chat(ChatBase):
+    id: int
+    user1_id: int
+    user2_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatWithLastMessage(Chat):
+    last_message: Optional[ChatMessage] = None
+    unread_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class WebSocketMessage(BaseModel):
+    message: str
+    chat_id: int
+    sender_id: int
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WebSocketResponse(BaseModel):
+    message_id: int
+    content: str
+    chat_id: int
+    sender_id: int
+    is_read: bool
+    created_at: datetime

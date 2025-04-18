@@ -15,8 +15,10 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/lostpets_db
       - DOCKER_ENV=true
+      - PORT=8000
     volumes:
       - ./app:/app/app
+      - ./add_chat_tables.py:/app/add_chat_tables.py  # Добавлен скрипт миграции
     networks:
       - lostpets-network
     healthcheck:

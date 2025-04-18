@@ -4,6 +4,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Установка системных зависимостей для OpenCV, PostgreSQL и TensorFlow
+# Добавлен curl для healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -12,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,6 +29,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     scipy==1.10.1 \
     numpy==1.24.3
 
+# Установка uvicorn с поддержкой websockets и других зависимостей
+RUN pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3
+
 # Установка остальных зависимостей из requirements.txt
 RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
 
@@ -39,8 +44,11 @@ ENV TF_FORCE_GPU_ALLOW_GROWTH="true"
 ENV TF_CPP_MIN_LOG_LEVEL="2"
 ENV PYTHONUNBUFFERED=1
 
+# Установка переменной порта с значением по умолчанию
+ENV PORT=8000
+
 # Порт для FastAPI
 EXPOSE 8000
 
-# Создание таблиц при запуске и запуск приложения
-CMD python create_tables.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# Создание необходимых таблиц (включая таблицы для чата) при запуске и запуск приложения
+CMD python create_tables.py && python add_chat_tables.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT

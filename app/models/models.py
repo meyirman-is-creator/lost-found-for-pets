@@ -112,3 +112,39 @@ class VerificationCode(Base):
 
     # Отношения
     user = relationship("User", back_populates="verification_codes")
+
+
+class Chat(Base):
+    __tablename__ = "chats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Участники чата
+    user1_id = Column(Integer, ForeignKey("users.id"))
+    user2_id = Column(Integer, ForeignKey("users.id"))
+
+    # Опциональная привязка к питомцу (для чатов о найденном питомце)
+    pet_id = Column(Integer, ForeignKey("pets.id"), nullable=True)
+
+    # Отношения
+    user1 = relationship("User", foreign_keys=[user1_id])
+    user2 = relationship("User", foreign_keys=[user2_id])
+    pet = relationship("Pet", foreign_keys=[pet_id])
+    messages = relationship("ChatMessage", back_populates="chat", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(Integer, ForeignKey("chats.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+
+    # Отношения
+    chat = relationship("Chat", back_populates="messages")
+    sender = relationship("User")
