@@ -29,8 +29,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     scipy==1.10.1 \
     numpy==1.24.3
 
-# Установка uvicorn с поддержкой websockets и других зависимостей
-RUN pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3
+# Установка uvicorn с поддержкой websockets и SQLAlchemy
+RUN pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3 sqlalchemy>=2.0.0
 
 # Установка остальных зависимостей из requirements.txt
 RUN pip install --no-cache-dir --ignore-installed -r requirements.txt

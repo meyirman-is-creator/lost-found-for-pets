@@ -24,3 +24,4 @@ tensorflow-metal==0.5.0 ; platform_system=="Darwin" and platform_machine=="arm64
 # Добавьте эти строки в конец вашего requirements.txt, если их еще нет
 websockets>=11.0.3
 uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.0
