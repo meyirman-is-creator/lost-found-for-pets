@@ -1,9 +1,8 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.api import api_router
-from app.core.config import settings
 import logging
 from app.db.database import engine, Base
+from app.core.config import settings
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,8 +34,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключение маршрутов API
-app.include_router(api_router, prefix=settings.API_V1_STR)
+# Подключение маршрутов API с обработкой ошибок импорта TensorFlow
+try:
+    from app.api.api import api_router
+
+    app.include_router(api_router, prefix=settings.API_V1_STR)
+    logger.info("API routes loaded successfully")
+except ModuleNotFoundError as e:
+    if "tensorflow.keras" in str(e):
+        logger.error("TensorFlow not properly installed. Image similarity features will be unavailable.")
+        logger.error("Please install TensorFlow with: pip install tensorflow-macos tensorflow-metal")
+
+        # Try to load API routes without CV functionality
+        try:
+            # This is a placeholder - you would need to implement a version of your API
+            # that doesn't depend on TensorFlow or handle it gracefully within your endpoints
+            logger.warning("Attempting to load API with limited functionality...")
+
+            # You could implement a simplified version of your API without the CV module
+            # or modify your endpoints to handle the missing dependency gracefully
+            from app.api.api import api_router  # You would need a version that handles the missing dependency
+
+            app.include_router(api_router, prefix=settings.API_V1_STR)
+        except Exception as inner_e:
+            logger.error(f"Failed to load API with limited functionality: {inner_e}")
+    else:
+        logger.error(f"Module import error: {e}")
 
 
 @app.get("/")
@@ -61,5 +84,6 @@ def health_check():
 if __name__ == "__main__":
     import uvicorn
     import os
+
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)

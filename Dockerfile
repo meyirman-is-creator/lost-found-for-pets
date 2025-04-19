@@ -50,5 +50,9 @@ ENV PORT=8000
 # Порт для FastAPI
 EXPOSE 8000
 
-# Создание необходимых таблиц (включая таблицы для чата) при запуске и запуск приложения
-CMD python create_tables.py && python add_chat_tables.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# Запуск всех миграций перед запуском приложения
+CMD python create_tables.py && \
+    python add_chat_tables.py && \
+    python simplified_add_chat_tables.py && \
+    python update_user_status_fields.py && \
+    uvicorn app.main:app --host 0.0.0.0 --port $PORT
