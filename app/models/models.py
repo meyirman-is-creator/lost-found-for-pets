@@ -25,6 +25,8 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_active_at = Column(DateTime, nullable=True)
+    is_online = Column(Boolean, default=False)
 
     # Отношения
     pets = relationship("Pet", back_populates="owner")

@@ -266,3 +266,25 @@ class WebSocketResponse(BaseModel):
     sender_id: int
     is_read: bool
     created_at: datetime
+
+
+class MessageType(str, Enum):
+    TEXT = "text"
+    TYPING_STARTED = "typing_started"
+    TYPING_ENDED = "typing_ended"
+    USER_ONLINE = "user_online"
+    USER_OFFLINE = "user_offline"
+    MESSAGE_READ = "message_read"
+
+
+class WebSocketMessageRequest(BaseModel):
+    message_type: MessageType
+    content: Optional[str] = None
+    message_id: Optional[int] = None  # Для подтверждения прочтения
+
+
+class WebSocketStatusResponse(BaseModel):
+    user_id: int
+    status_type: MessageType
+    last_active_at: Optional[datetime] = None
+    message_id: Optional[int] = None  # Для подтверждения прочтения
