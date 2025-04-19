@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from app.db.database import engine, Base
@@ -34,33 +34,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключение маршрутов API с обработкой ошибок импорта TensorFlow
+# Создаем заглушку для similarity_service
+class DummySimilarityService:
+    def compute_similarity(self, img1_source, img2_source):
+        logger.warning("TensorFlow not available, returning dummy similarity score.")
+        return 0.5  # Возвращаем условное среднее значение
+
+# Пытаемся загрузить настоящий сервис, а если не получится - используем заглушку
+try:
+    import tensorflow as tf
+    from app.services.cv.similarity import similarity_service
+    logger.info("TensorFlow loaded successfully")
+except ImportError:
+    logger.warning("TensorFlow not properly installed. Using dummy similarity service.")
+    # Монтируем заглушку вместо реального сервиса
+    import sys
+    import app.services.cv
+    if not hasattr(app.services.cv, 'similarity'):
+        app.services.cv.similarity = type('', (), {})()
+    app.services.cv.similarity.similarity_service = DummySimilarityService()
+
+# Загружаем маршруты API
 try:
     from app.api.api import api_router
-
     app.include_router(api_router, prefix=settings.API_V1_STR)
     logger.info("API routes loaded successfully")
-except ModuleNotFoundError as e:
-    if "tensorflow.keras" in str(e):
-        logger.error("TensorFlow not properly installed. Image similarity features will be unavailable.")
-        logger.error("Please install TensorFlow with: pip install tensorflow-macos tensorflow-metal")
-
-        # Try to load API routes without CV functionality
-        try:
-            # This is a placeholder - you would need to implement a version of your API
-            # that doesn't depend on TensorFlow or handle it gracefully within your endpoints
-            logger.warning("Attempting to load API with limited functionality...")
-
-            # You could implement a simplified version of your API without the CV module
-            # or modify your endpoints to handle the missing dependency gracefully
-            from app.api.api import api_router  # You would need a version that handles the missing dependency
-
-            app.include_router(api_router, prefix=settings.API_V1_STR)
-        except Exception as inner_e:
-            logger.error(f"Failed to load API with limited functionality: {inner_e}")
-    else:
-        logger.error(f"Module import error: {e}")
-
+except Exception as e:
+    logger.error(f"Failed to load API routes: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
 
 @app.get("/")
 def root():
@@ -72,14 +74,12 @@ def root():
         "docs": f"{settings.API_V1_STR}/docs"
     }
 
-
 @app.get("/health")
 def health_check():
     """
     Health check endpoint
     """
     return {"status": "ok"}
-
 
 if __name__ == "__main__":
     import uvicorn
