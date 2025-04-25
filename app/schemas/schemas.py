@@ -100,6 +100,8 @@ class Pet(PetBase):
     updated_at: datetime
     lost_date: Optional[datetime] = None
     owner_id: int
+    coordX: Optional[str] = None
+    coordY: Optional[str] = None
 
     class Config:
         from_attributes = True
