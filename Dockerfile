@@ -20,17 +20,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Копирование requirements.txt
 COPY requirements.txt .
 
-# Установка основных зависимостей с актуальными версиями TensorFlow
+# Установка uvicorn с поддержкой websockets и SQLAlchemy сначала
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
+    pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3 sqlalchemy>=2.0.0
+
+# Установка TensorFlow и связанных библиотек
+RUN pip install --no-cache-dir \
     tensorflow==2.15.0 \
     scikit-learn==1.0.2 \
     Pillow==9.5.0 \
     scipy==1.10.1 \
     numpy==1.24.3
-
-# Установка uvicorn с поддержкой websockets и SQLAlchemy
-RUN pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3 sqlalchemy>=2.0.0
 
 # Установка остальных зависимостей из requirements.txt
 RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
@@ -43,6 +43,7 @@ ENV CUDA_VISIBLE_DEVICES="-1"
 ENV TF_FORCE_GPU_ALLOW_GROWTH="true"
 ENV TF_CPP_MIN_LOG_LEVEL="2"
 ENV PYTHONUNBUFFERED=1
+ENV DOCKER_ENV="true"
 
 # Установка переменной порта с значением по умолчанию
 ENV PORT=8000
@@ -56,4 +57,5 @@ CMD python create_tables.py && \
     python simplified_add_chat_tables.py && \
     python update_user_status_fields.py && \
     python add_pet_coordinates.py && \
-    uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    python -c "import os; print('Starting app with DOCKER_ENV=', os.environ.get('DOCKER_ENV'))" && \
+    uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-use-colors
