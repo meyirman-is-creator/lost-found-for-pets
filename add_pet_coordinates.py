@@ -14,31 +14,35 @@ def add_pet_coordinates():
     # Проверяем, существуют ли уже колонки
     inspector = sa.inspect(engine)
     columns = inspector.get_columns('pets')
-    column_names = [col['name'].lower() for col in columns]  # Преобразуем в нижний регистр
+    column_names = [col['name'] for col in columns]  # Не приводим к нижнему регистру
+
+    logger.info(f"Existing columns: {column_names}")
 
     with engine.begin() as conn:
         try:
             # Добавляем поле coordX, если его еще нет
-            if 'coordx' not in column_names:
+            if 'coordX' not in column_names:
                 logger.info("Adding coordX column to pets table...")
                 conn.execute(sa.text(
-                    "ALTER TABLE pets ADD COLUMN coordX VARCHAR"
+                    'ALTER TABLE pets ADD COLUMN "coordX" VARCHAR'
                 ))
             else:
                 logger.info("Column coordX already exists in pets table")
 
             # Добавляем поле coordY, если его еще нет
-            if 'coordy' not in column_names:
+            if 'coordY' not in column_names:
                 logger.info("Adding coordY column to pets table...")
                 conn.execute(sa.text(
-                    "ALTER TABLE pets ADD COLUMN coordY VARCHAR"
+                    'ALTER TABLE pets ADD COLUMN "coordY" VARCHAR'
                 ))
             else:
                 logger.info("Column coordY already exists in pets table")
         except Exception as e:
-            # Обрабатываем ошибку, но не прерываем выполнение
+            # Логируем ошибку подробно
             logger.error(f"Error adding columns: {e}")
-            logger.info("Continuing, columns might already exist")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise  # Останавливаем выполнение в случае ошибки
 
     logger.info("Pet coordinates fields migration completed!")
 
