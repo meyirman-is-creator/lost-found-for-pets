@@ -28,7 +28,6 @@ class User(Base):
     last_active_at = Column(DateTime, nullable=True)
     is_online = Column(Boolean, default=False)
 
-    # Отношения
     pets = relationship("Pet", back_populates="owner")
     notifications = relationship("Notification", back_populates="user")
     verification_codes = relationship("VerificationCode", back_populates="user")
@@ -39,7 +38,7 @@ class Pet(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
-    species = Column(String, index=True)  # dog, cat, etc.
+    species = Column(String, index=True)
     breed = Column(String, index=True)
     age = Column(Integer, nullable=True)
     color = Column(String)
@@ -52,11 +51,11 @@ class Pet(Base):
     lost_date = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
-    # Отношения
     owner = relationship("User", back_populates="pets")
     photos = relationship("PetPhoto", back_populates="pet", cascade="all, delete-orphan")
-    matches = relationship("PetMatch", foreign_keys="[PetMatch.found_pet_id]", back_populates="found_pet")
-    lost_matches = relationship("PetMatch", foreign_keys="[PetMatch.lost_pet_id]", back_populates="lost_pet")
+    matches = relationship("PetMatch", foreign_keys="[PetMatch.found_pet_id]", back_populates="found_pet", cascade="all, delete-orphan")
+    lost_matches = relationship("PetMatch", foreign_keys="[PetMatch.lost_pet_id]", back_populates="lost_pet", cascade="all, delete-orphan")
+    chats = relationship("Chat", back_populates="pet", cascade="all, delete-orphan")
 
 
 class PetPhoto(Base):
@@ -65,10 +64,9 @@ class PetPhoto(Base):
     id = Column(Integer, primary_key=True, index=True)
     pet_id = Column(Integer, ForeignKey("pets.id"), nullable=False)
     photo_url = Column(String, nullable=False)
-    is_primary = Column(Boolean, default=False)  # Флаг для главной фотографии
+    is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
-    # Отношения
     pet = relationship("Pet", back_populates="photos")
 
 
@@ -78,13 +76,12 @@ class PetMatch(Base):
     id = Column(Integer, primary_key=True, index=True)
     found_pet_id = Column(Integer, ForeignKey("pets.id"))
     lost_pet_id = Column(Integer, ForeignKey("pets.id"))
-    similarity_score = Column(Float)  # Score from 0 to 1
+    similarity_score = Column(Float)
     created_at = Column(DateTime, default=func.now())
 
-    # Отношения
     found_pet = relationship("Pet", foreign_keys=[found_pet_id], back_populates="matches")
     lost_pet = relationship("Pet", foreign_keys=[lost_pet_id], back_populates="lost_matches")
-    notifications = relationship("Notification", back_populates="match")
+    notifications = relationship("Notification", back_populates="match", cascade="all, delete-orphan")
 
 
 class Notification(Base):
@@ -97,7 +94,6 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
-    # Отношения
     user = relationship("User", back_populates="notifications")
     match = relationship("PetMatch", back_populates="notifications")
 
@@ -112,7 +108,6 @@ class VerificationCode(Base):
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=func.now())
 
-    # Отношения
     user = relationship("User", back_populates="verification_codes")
 
 
@@ -123,17 +118,13 @@ class Chat(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    # Участники чата
     user1_id = Column(Integer, ForeignKey("users.id"))
     user2_id = Column(Integer, ForeignKey("users.id"))
+    pet_id = Column(Integer, ForeignKey("pets.id", ondelete="CASCADE"), nullable=True)
 
-    # Опциональная привязка к питомцу (для чатов о найденном питомце)
-    pet_id = Column(Integer, ForeignKey("pets.id"), nullable=True)
-
-    # Отношения
     user1 = relationship("User", foreign_keys=[user1_id])
     user2 = relationship("User", foreign_keys=[user2_id])
-    pet = relationship("Pet", foreign_keys=[pet_id])
+    pet = relationship("Pet", foreign_keys=[pet_id], back_populates="chats")
     messages = relationship("ChatMessage", back_populates="chat", cascade="all, delete-orphan")
 
 
@@ -147,6 +138,5 @@ class ChatMessage(Base):
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
-    # Отношения
     chat = relationship("Chat", back_populates="messages")
     sender = relationship("User")

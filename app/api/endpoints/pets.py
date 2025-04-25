@@ -7,7 +7,7 @@ import logging
 
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
-from app.models.models import Pet, PetStatus, User, PetPhoto
+from app.models.models import Pet, PetStatus, User, PetPhoto, Chat, PetMatch, Notification
 from app.schemas.schemas import (
     Pet as PetSchema,
     PetCreate,
@@ -32,15 +32,11 @@ def get_lost_pets(
         species: Optional[str] = None,
         db: Session = Depends(get_db)
 ) -> Any:
-    """
-    Get list of lost pets
-    """
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
     if species:
         query = query.filter(Pet.species == species)
 
-    # Используем joinedload для подгрузки фотографий питомцев
     pets = (query
             .options(joinedload(Pet.photos))
             .order_by(Pet.lost_date.desc())
@@ -55,9 +51,6 @@ def get_lost_pet(
         pet_id: int,
         db: Session = Depends(get_db)
 ) -> Any:
-    """
-    Get details of a specific lost pet
-    """
     pet = (db.query(Pet)
            .filter(Pet.id == pet_id, Pet.status == PetStatus.LOST)
            .options(joinedload(Pet.photos))
@@ -75,9 +68,6 @@ def get_my_pets(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Get list of current user's pets
-    """
     pets = (db.query(Pet)
             .filter(Pet.owner_id == current_user.id)
             .options(joinedload(Pet.photos))
@@ -98,10 +88,6 @@ async def create_pet(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Create a new pet with multiple photos
-    """
-    # Create pet without photos first
     db_pet = Pet(
         name=name,
         species=species,
@@ -118,7 +104,6 @@ async def create_pet(
     db.commit()
     db.refresh(db_pet)
 
-    # Process and upload photos
     primary_photo_set = False
     for i, photo in enumerate(photos):
         file_content = await photo.read()
@@ -128,15 +113,12 @@ async def create_pet(
         )
 
         if not photo_url:
-            # If photo upload fails, continue with next photo
             continue
 
-        # First photo is set as primary by default
         is_primary = (i == 0) or not primary_photo_set
         if is_primary:
             primary_photo_set = True
 
-        # Create photo record
         db_photo = PetPhoto(
             pet_id=db_pet.id,
             photo_url=photo_url,
@@ -157,9 +139,6 @@ def update_pet(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Update pet information
-    """
     pet = (db.query(Pet)
            .filter(Pet.id == pet_id, Pet.owner_id == current_user.id)
            .options(joinedload(Pet.photos))
@@ -170,14 +149,11 @@ def update_pet(
             detail="Pet not found"
         )
 
-    # Update status if changed to "lost"
     original_status = pet.status
 
-    # Update pet fields
     for key, value in pet_in.dict(exclude_unset=True).items():
         setattr(pet, key, value)
 
-    # If status changed to lost, update lost_date
     if original_status != PetStatus.LOST and pet.status == PetStatus.LOST:
         pet.lost_date = datetime.utcnow()
 
@@ -196,9 +172,6 @@ async def add_pet_photos(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Add new photos to an existing pet
-    """
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
         raise HTTPException(
@@ -206,11 +179,9 @@ async def add_pet_photos(
             detail="Pet not found"
         )
 
-    # Check if there are any existing photos to determine if we need to set primary
     existing_photos = db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).all()
     has_primary = any(photo.is_primary for photo in existing_photos)
 
-    # Process and upload photos
     uploaded_photos = []
     for i, photo in enumerate(photos):
         file_content = await photo.read()
@@ -220,20 +191,16 @@ async def add_pet_photos(
         )
 
         if not photo_url:
-            # If photo upload fails, continue with next photo
             continue
 
-        # Set as primary if requested or if no primary exists
         is_primary = (i == 0 and set_primary) or (i == 0 and not has_primary)
 
-        # If we're setting a new primary, unset all others
         if is_primary:
             db.query(PetPhoto).filter(
                 PetPhoto.pet_id == pet_id,
                 PetPhoto.is_primary == True
             ).update({"is_primary": False})
 
-        # Create photo record
         db_photo = PetPhoto(
             pet_id=pet_id,
             photo_url=photo_url,
@@ -244,7 +211,6 @@ async def add_pet_photos(
 
     db.commit()
 
-    # Refresh all photos to get their IDs
     for photo in uploaded_photos:
         db.refresh(photo)
 
@@ -258,10 +224,6 @@ def set_primary_photo(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Set a specific photo as the primary photo for a pet
-    """
-    # Verify the pet belongs to the current user
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
         raise HTTPException(
@@ -269,7 +231,6 @@ def set_primary_photo(
             detail="Pet not found"
         )
 
-    # Get the photo to set as primary
     photo = db.query(PetPhoto).filter(PetPhoto.id == photo_id, PetPhoto.pet_id == pet_id).first()
     if not photo:
         raise HTTPException(
@@ -277,10 +238,8 @@ def set_primary_photo(
             detail="Photo not found"
         )
 
-    # Set all photos as non-primary
     db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).update({"is_primary": False})
 
-    # Set the selected photo as primary
     photo.is_primary = True
     db.add(photo)
     db.commit()
@@ -296,10 +255,6 @@ def delete_pet_photo(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Delete a pet photo
-    """
-    # Verify the pet belongs to the current user
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
         raise HTTPException(
@@ -307,7 +262,6 @@ def delete_pet_photo(
             detail="Pet not found"
         )
 
-    # Get the photo to delete
     photo = db.query(PetPhoto).filter(PetPhoto.id == photo_id, PetPhoto.pet_id == pet_id).first()
     if not photo:
         raise HTTPException(
@@ -315,7 +269,6 @@ def delete_pet_photo(
             detail="Photo not found"
         )
 
-    # If this is the primary photo, find another photo to set as primary
     if photo.is_primary:
         next_photo = db.query(PetPhoto).filter(
             PetPhoto.pet_id == pet_id,
@@ -326,11 +279,9 @@ def delete_pet_photo(
             next_photo.is_primary = True
             db.add(next_photo)
 
-    # Try to delete from S3 first
     if photo.photo_url:
         s3_client.delete_file(photo.photo_url)
 
-    # Delete from database
     db.delete(photo)
     db.commit()
 
@@ -343,9 +294,6 @@ def delete_pet(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Delete a pet and all its photos
-    """
     pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == current_user.id).first()
     if not pet:
         raise HTTPException(
@@ -353,17 +301,22 @@ def delete_pet(
             detail="Pet not found"
         )
 
-    # Get all photos to delete from S3
     photos = db.query(PetPhoto).filter(PetPhoto.pet_id == pet_id).all()
 
-    # Delete photos from S3
     for photo in photos:
         if photo.photo_url:
             s3_client.delete_file(photo.photo_url)
 
-    # The pet and its photos will be deleted from the database (cascade delete)
-    db.delete(pet)
-    db.commit()
+    try:
+        db.delete(pet)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting pet {pet_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete pet. There might be related records."
+        )
 
     return {"message": "Pet deleted successfully"}
 
@@ -378,14 +331,8 @@ async def search_pets(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Search for lost pets that match the provided criteria and compare the photo
-    using computer vision algorithms
-    """
-    # Читаем содержимое загруженного файла
     photo_content = await photo.read()
 
-    # Загружаем фото в S3 для временного хранения
     found_pet_photo_url = s3_client.upload_file(
         photo_content,
         f"found_pets/{current_user.id}_{datetime.now().timestamp()}_{photo.filename}"
@@ -397,41 +344,31 @@ async def search_pets(
             detail="Failed to upload photo"
         )
 
-    # Создаем базовый запрос для поиска потерянных питомцев
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
-    # Фильтруем по обязательным критериям
     query = query.filter(Pet.species == species)
 
-    # Используем LIKE для более гибкого поиска по цвету
     query = query.filter(Pet.color.ilike(f"%{color}%"))
 
-    # Фильтруем по опциональным критериям, если они предоставлены
     if gender:
         query = query.filter(Pet.gender == gender)
 
     if breed:
         query = query.filter(Pet.breed.ilike(f"%{breed}%"))
 
-    # Получаем отфильтрованных питомцев с их фотографиями
     potential_matches = query.options(joinedload(Pet.photos)).all()
 
     logger.info(f"Found {len(potential_matches)} potential matches after filtering")
 
-    # Если нет потенциальных совпадений, возвращаем пустой список
     if not potential_matches:
-        # После использования удаляем временную фотографию
         s3_client.delete_file(found_pet_photo_url)
         return {"matches": []}
 
-    # Для каждого питомца вычисляем оценку сходства с загруженным фото
     similarity_results = []
 
-    # Используем более низкий порог сходства для более широкого охвата
-    similarity_threshold = 0.35  # Ниже стандартного порога в 0.5
+    similarity_threshold = 0.35
 
     for pet in potential_matches:
-        # Берем первичное фото питомца, если есть
         pet_photos = [photo for photo in pet.photos if photo.is_primary]
         if not pet_photos and pet.photos:
             pet_photos = [pet.photos[0]]
@@ -441,7 +378,6 @@ async def search_pets(
 
         pet_photo_url = pet_photos[0].photo_url
 
-        # Вычисляем оценку сходства
         try:
             similarity_score = similarity_service.compute_similarity(
                 found_pet_photo_url, pet_photo_url
@@ -449,7 +385,6 @@ async def search_pets(
 
             logger.info(f"Pet ID {pet.id}, similarity score: {similarity_score}")
 
-            # Добавляем результат, если оценка выше порогового значения
             if similarity_score >= similarity_threshold:
                 similarity_results.append(
                     SimilarityResult(
@@ -461,10 +396,8 @@ async def search_pets(
             logger.error(f"Error computing similarity for pet {pet.id}: {e}")
             continue
 
-    # Сортируем результаты по убыванию оценки сходства
     similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)
 
-    # После использования удаляем временную фотографию
     s3_client.delete_file(found_pet_photo_url)
 
     return {"matches": similarity_results}
