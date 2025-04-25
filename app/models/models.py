@@ -1,3 +1,4 @@
+# app/models/models.py (обновление модели Pet)
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, Enum, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -46,6 +47,8 @@ class Pet(Base):
     distinctive_features = Column(Text, nullable=True)
     status = Column(Enum(PetStatus), default=PetStatus.HOME)
     last_seen_location = Column(String, nullable=True)
+    coordX = Column(String, nullable=True)
+    coordY = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     lost_date = Column(DateTime, nullable=True)

@@ -1,3 +1,4 @@
+# app/api/endpoints/pets.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
@@ -44,6 +45,44 @@ def get_lost_pets(
             .limit(limit)
             .all())
     return pets
+
+
+@router.get("/found", response_model=List[PetSchema])
+def get_found_pets(
+        skip: int = 0,
+        limit: int = 100,
+        species: Optional[str] = None,
+        db: Session = Depends(get_db)
+) -> Any:
+    query = db.query(Pet).filter(Pet.status == PetStatus.FOUND)
+
+    if species:
+        query = query.filter(Pet.species == species)
+
+    pets = (query
+            .options(joinedload(Pet.photos))
+            .order_by(Pet.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all())
+    return pets
+
+
+@router.get("/found/{pet_id}", response_model=PetSchema)
+def get_found_pet(
+        pet_id: int,
+        db: Session = Depends(get_db)
+) -> Any:
+    pet = (db.query(Pet)
+           .filter(Pet.id == pet_id, Pet.status == PetStatus.FOUND)
+           .options(joinedload(Pet.photos))
+           .first())
+    if not pet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet not found"
+        )
+    return pet
 
 
 @router.get("/lost/{pet_id}", response_model=PetSchema)
@@ -320,17 +359,25 @@ def delete_pet(
 
     return {"message": "Pet deleted successfully"}
 
-
 @router.post("/search", response_model=SimilarityResponse)
 async def search_pets(
         photo: UploadFile = File(...),
         species: str = Form(...),
         color: str = Form(...),
+        save: bool = Form(...),
+        coordX: Optional[str] = Form(None),
+        coordY: Optional[str] = Form(None),
         gender: Optional[str] = Form(None),
         breed: Optional[str] = Form(None),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
+    if save and (coordX is None or coordY is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Coordinates (coordX and coordY) are required when saving a found pet"
+        )
+
     photo_content = await photo.read()
 
     found_pet_photo_url = s3_client.upload_file(
@@ -343,6 +390,32 @@ async def search_pets(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload photo"
         )
+
+    if save:
+        db_pet = Pet(
+            name=f"Found {species.capitalize()}",
+            species=species,
+            breed=breed,
+            color=color,
+            gender=gender,
+            status=PetStatus.FOUND,
+            last_seen_location=f"Coordinates: {coordX}, {coordY}",
+            coordX=coordX,
+            coordY=coordY,
+            owner_id=current_user.id
+        )
+
+        db.add(db_pet)
+        db.commit()
+        db.refresh(db_pet)
+
+        db_photo = PetPhoto(
+            pet_id=db_pet.id,
+            photo_url=found_pet_photo_url,
+            is_primary=True
+        )
+        db.add(db_photo)
+        db.commit()
 
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
@@ -361,7 +434,8 @@ async def search_pets(
     logger.info(f"Found {len(potential_matches)} potential matches after filtering")
 
     if not potential_matches:
-        s3_client.delete_file(found_pet_photo_url)
+        if not save:
+            s3_client.delete_file(found_pet_photo_url)
         return {"matches": []}
 
     similarity_results = []
@@ -398,6 +472,7 @@ async def search_pets(
 
     similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)
 
-    s3_client.delete_file(found_pet_photo_url)
+    if not save:
+        s3_client.delete_file(found_pet_photo_url)
 
     return {"matches": similarity_results}

@@ -55,4 +55,5 @@ CMD python create_tables.py && \
     python add_chat_tables.py && \
     python simplified_add_chat_tables.py && \
     python update_user_status_fields.py && \
+    python add_pet_coordinates.py && \
     uvicorn app.main:app --host 0.0.0.0 --port $PORT
