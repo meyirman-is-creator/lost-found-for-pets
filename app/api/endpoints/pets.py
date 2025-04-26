@@ -59,12 +59,21 @@ def get_found_pets(
     if species:
         query = query.filter(Pet.species == species)
 
+    # Получаем найденных питомцев с фотографиями
     pets = (query
             .options(joinedload(Pet.photos))
+            .options(joinedload(Pet.found_locations))  # Добавляем подгрузку координат
             .order_by(Pet.created_at.desc())
             .offset(skip)
             .limit(limit)
             .all())
+
+    # Заполняем координаты для каждого питомца из связанной таблицы found_locations
+    for pet in pets:
+        if pet.found_locations and len(pet.found_locations) > 0:
+            pet.coordX = pet.found_locations[0].coordX
+            pet.coordY = pet.found_locations[0].coordY
+
     return pets
 
 
@@ -76,14 +85,20 @@ def get_found_pet(
     pet = (db.query(Pet)
            .filter(Pet.id == pet_id, Pet.status == PetStatus.FOUND)
            .options(joinedload(Pet.photos))
+           .options(joinedload(Pet.found_locations))  # Добавляем подгрузку координат
            .first())
     if not pet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pet not found"
         )
-    return pet
 
+    # Заполняем координаты из связанной таблицы found_locations
+    if pet.found_locations and len(pet.found_locations) > 0:
+        pet.coordX = pet.found_locations[0].coordX
+        pet.coordY = pet.found_locations[0].coordY
+
+    return pet
 
 @router.get("/lost/{pet_id}", response_model=PetSchema)
 def get_lost_pet(
