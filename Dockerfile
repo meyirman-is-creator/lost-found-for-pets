@@ -52,10 +52,18 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Запуск всех миграций перед запуском приложения
-CMD python create_tables.py && \
-    python add_chat_tables.py && \
-    python simplified_add_chat_tables.py && \
-    python update_user_status_fields.py && \
-    python add_pet_coordinates.py && \
+# Создаем единый скрипт для запуска всех миграций с безопасной проверкой
+RUN echo '#!/bin/bash' > /app/run_migrations.sh && \
+    echo 'set -e' >> /app/run_migrations.sh && \
+    echo 'python create_tables.py' >> /app/run_migrations.sh && \
+    echo 'python add_chat_tables.py' >> /app/run_migrations.sh && \
+    echo 'python simplified_add_chat_tables.py' >> /app/run_migrations.sh && \
+    echo 'python update_user_status_fields.py' >> /app/run_migrations.sh && \
+    echo 'python create_founded_pets_table.py' >> /app/run_migrations.sh && \
+    echo 'echo "All migrations completed successfully"' >> /app/run_migrations.sh && \
+    chmod +x /app/run_migrations.sh
+
+# Запуск миграций и приложения
+CMD /app/run_migrations.sh && \
     python -c "import os; print('Starting app with DOCKER_ENV=', os.environ.get('DOCKER_ENV'))" && \
     uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-use-colors

@@ -19,6 +19,10 @@ def add_user_status_fields():
     columns = inspector.get_columns('users')
     column_names = [col['name'] for col in columns]
 
+    if 'is_online' in column_names and 'last_active_at' in column_names:
+        logger.info("User status fields already exist. Skipping migration.")
+        return
+
     with engine.begin() as conn:
         # Добавляем поле is_online, если его еще нет
         if 'is_online' not in column_names:
@@ -26,6 +30,9 @@ def add_user_status_fields():
             conn.execute(sa.text(
                 "ALTER TABLE users ADD COLUMN is_online BOOLEAN DEFAULT FALSE"
             ))
+            logger.info("is_online column added successfully.")
+        else:
+            logger.info("is_online column already exists, skipping.")
 
         # Добавляем поле last_active_at, если его еще нет
         if 'last_active_at' not in column_names:
@@ -33,8 +40,11 @@ def add_user_status_fields():
             conn.execute(sa.text(
                 "ALTER TABLE users ADD COLUMN last_active_at TIMESTAMP"
             ))
+            logger.info("last_active_at column added successfully.")
+        else:
+            logger.info("last_active_at column already exists, skipping.")
 
-    logger.info("User status fields added successfully!")
+    logger.info("User status fields migration completed!")
 
 
 if __name__ == "__main__":

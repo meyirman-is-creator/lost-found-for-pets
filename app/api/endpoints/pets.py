@@ -8,7 +8,7 @@ import logging
 
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
-from app.models.models import Pet, PetStatus, User, PetPhoto, Chat, PetMatch, Notification
+from app.models.models import Pet, PetStatus, User, PetPhoto, Chat, PetMatch, Notification, FoundPet
 from app.schemas.schemas import (
     Pet as PetSchema,
     PetCreate,
@@ -359,6 +359,7 @@ def delete_pet(
 
     return {"message": "Pet deleted successfully"}
 
+
 @router.post("/search", response_model=SimilarityResponse)
 async def search_pets(
         photo: UploadFile = File(...),
@@ -392,6 +393,7 @@ async def search_pets(
         )
 
     if save:
+        # Создаем новую запись о питомце без координат в основной таблице
         db_pet = Pet(
             name=f"Found {species.capitalize()}",
             species=species,
@@ -400,8 +402,6 @@ async def search_pets(
             gender=gender,
             status=PetStatus.FOUND,
             last_seen_location=f"Coordinates: {coordX}, {coordY}",
-            coordX=coordX,
-            coordY=coordY,
             owner_id=current_user.id
         )
 
@@ -409,12 +409,21 @@ async def search_pets(
         db.commit()
         db.refresh(db_pet)
 
+        # Добавляем фото питомца
         db_photo = PetPhoto(
             pet_id=db_pet.id,
             photo_url=found_pet_photo_url,
             is_primary=True
         )
         db.add(db_photo)
+
+        # Создаем запись о координатах найденного питомца
+        db_found_pet = FoundPet(
+            pet_id=db_pet.id,
+            coordX=coordX,
+            coordY=coordY
+        )
+        db.add(db_found_pet)
         db.commit()
 
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)

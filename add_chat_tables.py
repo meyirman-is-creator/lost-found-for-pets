@@ -1,6 +1,6 @@
 from app.db.database import engine, Base
 from app.models.models import User, Pet
-from sqlalchemy import Column, Integer, ForeignKey, Text, Boolean, DateTime, Table, MetaData
+from sqlalchemy import Column, Integer, ForeignKey, Text, Boolean, DateTime, Table, MetaData, inspect
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import sqlalchemy as sa
@@ -15,7 +15,7 @@ def create_chat_tables():
     logger.info("Starting migration to add chat tables...")
 
     # Проверяем, существуют ли уже таблицы
-    inspector = sa.inspect(engine)
+    inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
 
     if 'chats' in existing_tables and 'chat_messages' in existing_tables:
@@ -44,12 +44,15 @@ def create_chat_tables():
         created_at = Column(DateTime, default=func.now())
 
     # Создаем только новые таблицы
-    logger.info("Creating chat tables...")
-    Base.metadata.create_all(engine, tables=[
-        Base.metadata.tables["chats"],
-        Base.metadata.tables["chat_messages"]
-    ])
-    logger.info("Chat tables created successfully!")
+    try:
+        logger.info("Creating chat tables...")
+        Base.metadata.create_all(engine, tables=[
+            Base.metadata.tables["chats"],
+            Base.metadata.tables["chat_messages"]
+        ])
+        logger.info("Chat tables created successfully!")
+    except Exception as e:
+        logger.error(f"Error creating chat tables: {e}")
 
 
 if __name__ == "__main__":

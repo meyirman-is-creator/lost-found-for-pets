@@ -1,4 +1,4 @@
-# app/models/models.py (обновление модели Pet)
+# app/models/models.py
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, Enum, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -47,8 +47,6 @@ class Pet(Base):
     distinctive_features = Column(Text, nullable=True)
     status = Column(Enum(PetStatus), default=PetStatus.HOME)
     last_seen_location = Column(String, nullable=True)
-    coordX = Column(String, nullable=True)
-    coordY = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     lost_date = Column(DateTime, nullable=True)
@@ -56,9 +54,24 @@ class Pet(Base):
 
     owner = relationship("User", back_populates="pets")
     photos = relationship("PetPhoto", back_populates="pet", cascade="all, delete-orphan")
-    matches = relationship("PetMatch", foreign_keys="[PetMatch.found_pet_id]", back_populates="found_pet", cascade="all, delete-orphan")
-    lost_matches = relationship("PetMatch", foreign_keys="[PetMatch.lost_pet_id]", back_populates="lost_pet", cascade="all, delete-orphan")
+    matches = relationship("PetMatch", foreign_keys="[PetMatch.found_pet_id]", back_populates="found_pet",
+                           cascade="all, delete-orphan")
+    lost_matches = relationship("PetMatch", foreign_keys="[PetMatch.lost_pet_id]", back_populates="lost_pet",
+                                cascade="all, delete-orphan")
     chats = relationship("Chat", back_populates="pet", cascade="all, delete-orphan")
+    found_locations = relationship("FoundPet", back_populates="pet", cascade="all, delete-orphan")
+
+
+class FoundPet(Base):
+    __tablename__ = "founded_pets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pet_id = Column(Integer, ForeignKey("pets.id", ondelete="CASCADE"), nullable=False)
+    coordX = Column(String, nullable=True)
+    coordY = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    pet = relationship("Pet", back_populates="found_locations")
 
 
 class PetPhoto(Base):
