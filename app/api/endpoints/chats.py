@@ -229,9 +229,8 @@ def get_chat_messages(
         ChatMessage.chat_id == chat_id
     ).order_by(ChatMessage.created_at.asc()).offset(skip).limit(limit).all()
 
-    # Add whoid attribute to each message
     for message in messages:
-        setattr(message, 'whoid', message.sender_id)
+        setattr(message, 'whoid', current_user.id)
 
     db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id,
