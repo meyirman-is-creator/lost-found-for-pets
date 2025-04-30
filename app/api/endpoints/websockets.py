@@ -11,6 +11,13 @@ from app.db.database import SessionLocal
 from app.models.models import User, Chat, ChatMessage
 from app.schemas.schemas import WebSocketStatusResponse, MessageType
 
+# Настраиваем собственный JSON энкодер для datetime объектов
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -64,7 +71,8 @@ async def broadcast_user_status(user_id: int, is_online: bool, last_active_at: O
                         status_type=status_type,
                         last_active_at=last_active_at
                     )
-                    await ws.send_text(json.dumps(status_response.model_dump()))
+                    # Используем наш кастомный энкодер для datetime
+                    await ws.send_text(json.dumps(status_response.model_dump(), cls=DateTimeEncoder))
                 except Exception as e:
                     logger.error(f"Error sending status update to user {uid}: {e}")
 
@@ -106,8 +114,9 @@ async def mark_messages_as_read(db: Session, chat_id: int, user_id: int):
                     message_id=message.id
                 )
                 try:
+                    # Используем наш кастомный энкодер для datetime
                     await active_connections[chat_id][other_user_id].send_text(
-                        json.dumps(read_notification.model_dump()))
+                        json.dumps(read_notification.model_dump(), cls=DateTimeEncoder))
                 except Exception as e:
                     logger.error(f"Error sending read receipt for message {message.id}: {e}")
 
@@ -183,7 +192,8 @@ async def websocket_endpoint(
                 status_type=MessageType.USER_ONLINE if is_online else MessageType.USER_OFFLINE,
                 last_active_at=other_user.last_active_at
             )
-            await websocket.send_text(json.dumps(status_response.model_dump()))
+            # Используем наш кастомный энкодер для datetime
+            await websocket.send_text(json.dumps(status_response.model_dump(), cls=DateTimeEncoder))
 
         # Отправляем сообщение о успешном подключении
         await websocket.send_text(json.dumps({"message": "Connection established successfully", "type": "system"}))
@@ -247,7 +257,7 @@ async def websocket_endpoint(
                             "chat_id": new_message.chat_id,
                             "sender_id": new_message.sender_id,
                             "is_read": new_message.is_read,
-                            "created_at": new_message.created_at.isoformat(),
+                            "created_at": new_message.created_at,
                             "type": "text"  # Добавляем тип для совместимости с клиентом
                         }
 
@@ -264,8 +274,8 @@ async def websocket_endpoint(
                                     db.commit()
                                     logger.debug(f"Marked message as read for user {user_id}")
 
-                                # Отправляем сообщение
-                                await conn.send_text(json.dumps(response))
+                                # Отправляем сообщение - используем наш кастомный энкодер
+                                await conn.send_text(json.dumps(response, cls=DateTimeEncoder))
                                 logger.debug(f"Message sent to user {user_id}")
                             except Exception as e:
                                 logger.error(f"Error sending message to user {user_id}: {e}")
@@ -291,7 +301,8 @@ async def websocket_endpoint(
                                 status_type=MessageType.TYPING_STARTED
                             )
                             try:
-                                await conn.send_text(json.dumps(typing_notification.model_dump()))
+                                # Используем наш кастомный энкодер
+                                await conn.send_text(json.dumps(typing_notification.model_dump(), cls=DateTimeEncoder))
                             except Exception as e:
                                 logger.error(f"Error sending typing notification: {e}")
 
@@ -308,7 +319,8 @@ async def websocket_endpoint(
                                 status_type=MessageType.TYPING_ENDED
                             )
                             try:
-                                await conn.send_text(json.dumps(typing_notification.model_dump()))
+                                # Используем наш кастомный энкодер
+                                await conn.send_text(json.dumps(typing_notification.model_dump(), cls=DateTimeEncoder))
                             except Exception as e:
                                 logger.error(f"Error sending typing notification: {e}")
 
@@ -335,8 +347,9 @@ async def websocket_endpoint(
                                     message_id=message.id
                                 )
                                 try:
+                                    # Используем наш кастомный энкодер
                                     await active_connections[chat_id][message.sender_id].send_text(
-                                        json.dumps(read_notification.model_dump()))
+                                        json.dumps(read_notification.model_dump(), cls=DateTimeEncoder))
                                 except Exception as e:
                                     logger.error(f"Error sending read receipt: {e}")
 
