@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
 from typing import Any, List
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
 from app.models.models import Chat, ChatMessage, User, Pet
-from app.schemas.schemas import Chat as ChatSchema, ChatCreate, ChatMessage as ChatMessageSchema, ChatWithLastMessage
+from app.schemas.schemas import Chat as ChatSchema, ChatCreate, ChatMessage as ChatMessageSchema, ChatWithLastMessage, \
+    FirstMessageCreate
+from datetime import datetime
 
 router = APIRouter()
 
@@ -109,6 +111,74 @@ def create_chat(
     db.refresh(db_chat)
 
     return db_chat
+
+
+@router.post("/pet/{pet_id}/message", response_model=dict)
+def create_chat_and_send_first_message(
+        pet_id: int,
+        message_data: FirstMessageCreate = Body(...),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_verified_user)
+) -> Any:
+    """
+    Create a chat with the pet owner and send the first message
+    """
+    # Находим питомца и его владельца
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    if not pet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet not found"
+        )
+
+    # Проверяем, что пользователь не пытается написать самому себе
+    if pet.owner_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot create chat with yourself"
+        )
+
+    # Ищем существующий чат или создаем новый
+    existing_chat = db.query(Chat).filter(
+        or_(
+            and_(Chat.user1_id == current_user.id, Chat.user2_id == pet.owner_id, Chat.pet_id == pet_id),
+            and_(Chat.user1_id == pet.owner_id, Chat.user2_id == current_user.id, Chat.pet_id == pet_id)
+        )
+    ).first()
+
+    if existing_chat:
+        chat = existing_chat
+    else:
+        # Создаем новый чат
+        chat = Chat(
+            user1_id=current_user.id,
+            user2_id=pet.owner_id,
+            pet_id=pet_id
+        )
+        db.add(chat)
+        db.commit()
+        db.refresh(chat)
+
+    # Создаем и отправляем первое сообщение
+    message = ChatMessage(
+        chat_id=chat.id,
+        sender_id=current_user.id,
+        content=message_data.message,
+        is_read=False
+    )
+    db.add(message)
+
+    # Обновляем время последней активности чата
+    chat.updated_at = datetime.utcnow()
+    db.add(chat)
+    db.commit()
+
+    return {
+        "chat_id": chat.id,
+        "message_id": message.id,
+        "success": True,
+        "message": "Chat created and first message sent successfully"
+    }
 
 
 @router.get("/{chat_id}", response_model=ChatSchema)

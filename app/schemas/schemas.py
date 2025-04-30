@@ -105,7 +105,8 @@ class Pet(PetBase):
 
     class Config:
         from_attributes = True
-
+class FirstMessageCreate(BaseModel):
+    message: str
 
 # ----- Match Schemas -----
 
