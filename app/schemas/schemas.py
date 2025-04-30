@@ -10,8 +10,6 @@ class PetStatus(str, Enum):
     HOME = "home"
 
 
-# ----- User Schemas -----
-
 class UserBase(BaseModel):
     email: EmailStr
     full_name: Optional[str] = None
@@ -44,8 +42,6 @@ class User(UserBase):
         from_attributes = True
 
 
-# ----- Pet Photo Schemas -----
-
 class PetPhotoBase(BaseModel):
     is_primary: bool = False
 
@@ -63,8 +59,6 @@ class PetPhoto(PetPhotoBase):
     class Config:
         from_attributes = True
 
-
-# ----- Pet Schemas -----
 
 class PetBase(BaseModel):
     name: str
@@ -105,8 +99,11 @@ class Pet(PetBase):
 
     class Config:
         from_attributes = True
+
+
 class FirstMessageCreate(BaseModel):
     message: str
+
 
 class PetMatchBase(BaseModel):
     found_pet_id: int
@@ -134,8 +131,6 @@ class PetMatchWithDetails(PetMatch):
         from_attributes = True
 
 
-# ----- Notification Schemas -----
-
 class NotificationBase(BaseModel):
     user_id: int
     match_id: int
@@ -156,8 +151,6 @@ class Notification(NotificationBase):
         from_attributes = True
 
 
-# ----- Authentication Schemas -----
-
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -172,14 +165,10 @@ class Login(BaseModel):
     password: str
 
 
-# ----- Verification Schemas -----
-
 class VerificationRequest(BaseModel):
     email: EmailStr
     code: str
 
-
-# ----- Found Pet Schemas -----
 
 class FoundPetInfo(BaseModel):
     photo_base64: str
@@ -205,8 +194,6 @@ class SimilarityResponse(BaseModel):
         from_attributes = True
 
 
-# ----- Chat Schemas -----
-
 class ChatMessageBase(BaseModel):
     content: str
 
@@ -219,6 +206,7 @@ class ChatMessage(ChatMessageBase):
     id: int
     chat_id: int
     sender_id: int
+    whoid: Optional[int] = None
     is_read: bool
     created_at: datetime
 
@@ -285,11 +273,11 @@ class MessageType(str, Enum):
 class WebSocketMessageRequest(BaseModel):
     message_type: MessageType
     content: Optional[str] = None
-    message_id: Optional[int] = None  # Для подтверждения прочтения
+    message_id: Optional[int] = None
 
 
 class WebSocketStatusResponse(BaseModel):
     user_id: int
     status_type: MessageType
     last_active_at: Optional[datetime] = None
-    message_id: Optional[int] = None  # Для подтверждения прочтения
+    message_id: Optional[int] = None

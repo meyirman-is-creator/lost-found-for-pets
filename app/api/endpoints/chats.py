@@ -1,4 +1,3 @@
-# app/api/endpoints/chats.py
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, desc, func, asc
@@ -6,8 +5,7 @@ from typing import Any, List
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
 from app.models.models import Chat, ChatMessage, User, Pet, PetPhoto
-from app.schemas.schemas import Chat as ChatSchema, ChatCreate, ChatMessage as ChatMessageSchema, ChatWithLastMessage, \
-    FirstMessageCreate
+from app.schemas.schemas import Chat as ChatSchema, ChatCreate, ChatMessage as ChatMessageSchema, ChatWithLastMessage, FirstMessageCreate
 from datetime import datetime
 
 router = APIRouter()
@@ -230,6 +228,10 @@ def get_chat_messages(
     messages = db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id
     ).order_by(ChatMessage.created_at.asc()).offset(skip).limit(limit).all()
+
+    # Add whoid attribute to each message
+    for message in messages:
+        setattr(message, 'whoid', message.sender_id)
 
     db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id,
