@@ -108,8 +108,6 @@ class Pet(PetBase):
 class FirstMessageCreate(BaseModel):
     message: str
 
-# ----- Match Schemas -----
-
 class PetMatchBase(BaseModel):
     found_pet_id: int
     lost_pet_id: int
@@ -250,6 +248,10 @@ class Chat(ChatBase):
 class ChatWithLastMessage(Chat):
     last_message: Optional[ChatMessage] = None
     unread_count: int = 0
+    pet_photo_url: Optional[str] = None
+    pet_name: Optional[str] = None
+    pet_status: Optional[PetStatus] = None
+    other_user_name: Optional[str] = None
 
     class Config:
         from_attributes = True

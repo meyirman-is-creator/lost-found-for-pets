@@ -1,10 +1,11 @@
+# app/api/endpoints/chats.py
 from fastapi import APIRouter, Depends, HTTPException, status, Body
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, func
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, and_, desc, func, asc
 from typing import Any, List
 from app.api.dependencies import get_current_user, get_verified_user
 from app.db.database import get_db
-from app.models.models import Chat, ChatMessage, User, Pet
+from app.models.models import Chat, ChatMessage, User, Pet, PetPhoto
 from app.schemas.schemas import Chat as ChatSchema, ChatCreate, ChatMessage as ChatMessageSchema, ChatWithLastMessage, \
     FirstMessageCreate
 from datetime import datetime
@@ -18,7 +19,7 @@ def get_user_chats(
         current_user: User = Depends(get_verified_user)
 ) -> Any:
     """
-    Get all chats for the current user with last message and unread count
+    Get all chats for the current user with last message, unread count, pet info, and other user info
     """
     # Найти все чаты пользователя
     chats = db.query(Chat).filter(
@@ -42,6 +43,31 @@ def get_user_chats(
             ChatMessage.is_read == False
         ).scalar()
 
+        # Определить ID другого пользователя
+        other_user_id = chat.user2_id if chat.user1_id == current_user.id else chat.user1_id
+
+        # Получить информацию о другом пользователе
+        other_user = db.query(User).filter(User.id == other_user_id).first()
+        other_user_name = other_user.full_name if other_user else "Unknown User"
+
+        # Получить информацию о питомце, если есть
+        pet_photo_url = None
+        pet_name = None
+        pet_status = None
+
+        if chat.pet_id:
+            pet = db.query(Pet).filter(Pet.id == chat.pet_id).options(joinedload(Pet.photos)).first()
+            if pet:
+                pet_name = pet.name
+                pet_status = pet.status
+
+                # Получить основное фото питомца, если есть
+                primary_photo = next((photo for photo in pet.photos if photo.is_primary), None)
+                if primary_photo:
+                    pet_photo_url = primary_photo.photo_url
+                elif pet.photos:
+                    pet_photo_url = pet.photos[0].photo_url
+
         # Создать объект с чатом, последним сообщением и счетчиком непрочитанных
         chat_with_last = ChatWithLastMessage(
             id=chat.id,
@@ -51,7 +77,11 @@ def get_user_chats(
             created_at=chat.created_at,
             updated_at=chat.updated_at,
             last_message=last_message,
-            unread_count=unread_count
+            unread_count=unread_count,
+            pet_photo_url=pet_photo_url,
+            pet_name=pet_name,
+            pet_status=pet_status,
+            other_user_name=other_user_name
         )
         result.append(chat_with_last)
 
@@ -232,10 +262,10 @@ def get_chat_messages(
             detail="Not enough permissions"
         )
 
-    # Получение сообщений
+    # Получение сообщений - изменен порядок на возрастающий по дате (старые сверху, новые снизу)
     messages = db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id
-    ).order_by(ChatMessage.created_at.desc()).offset(skip).limit(limit).all()
+    ).order_by(ChatMessage.created_at.asc()).offset(skip).limit(limit).all()
 
     # Отметить все сообщения от другого пользователя как прочитанные
     db.query(ChatMessage).filter(
