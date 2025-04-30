@@ -18,10 +18,6 @@ def get_user_chats(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Get all chats for the current user with last message, unread count, pet info, and other user info
-    """
-    # Найти все чаты пользователя
     chats = db.query(Chat).filter(
         or_(
             Chat.user1_id == current_user.id,
@@ -31,26 +27,21 @@ def get_user_chats(
 
     result = []
     for chat in chats:
-        # Получить последнее сообщение для чата
         last_message = db.query(ChatMessage).filter(
             ChatMessage.chat_id == chat.id
         ).order_by(ChatMessage.created_at.desc()).first()
 
-        # Получить количество непрочитанных сообщений
         unread_count = db.query(func.count(ChatMessage.id)).filter(
             ChatMessage.chat_id == chat.id,
             ChatMessage.sender_id != current_user.id,
             ChatMessage.is_read == False
         ).scalar()
 
-        # Определить ID другого пользователя
         other_user_id = chat.user2_id if chat.user1_id == current_user.id else chat.user1_id
 
-        # Получить информацию о другом пользователе
         other_user = db.query(User).filter(User.id == other_user_id).first()
         other_user_name = other_user.full_name if other_user else "Unknown User"
 
-        # Получить информацию о питомце, если есть
         pet_photo_url = None
         pet_name = None
         pet_status = None
@@ -61,14 +52,12 @@ def get_user_chats(
                 pet_name = pet.name
                 pet_status = pet.status
 
-                # Получить основное фото питомца, если есть
                 primary_photo = next((photo for photo in pet.photos if photo.is_primary), None)
                 if primary_photo:
                     pet_photo_url = primary_photo.photo_url
                 elif pet.photos:
                     pet_photo_url = pet.photos[0].photo_url
 
-        # Создать объект с чатом, последним сообщением и счетчиком непрочитанных
         chat_with_last = ChatWithLastMessage(
             id=chat.id,
             user1_id=chat.user1_id,
@@ -94,10 +83,6 @@ def create_chat(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Create a new chat with another user
-    """
-    # Проверяем существование второго пользователя
     user2 = db.query(User).filter(User.id == chat_in.user2_id).first()
     if not user2:
         raise HTTPException(
@@ -105,15 +90,6 @@ def create_chat(
             detail="User not found"
         )
 
-    # Проверяем, существует ли уже чат между этими пользователями
-    existing_chat = db.query(Chat).filter(
-        or_(
-            and_(Chat.user1_id == current_user.id, Chat.user2_id == chat_in.user2_id),
-            and_(Chat.user1_id == chat_in.user2_id, Chat.user2_id == current_user.id)
-        )
-    )
-
-    # Если указан питомец, то проверяем и его
     if chat_in.pet_id:
         pet = db.query(Pet).filter(Pet.id == chat_in.pet_id).first()
         if not pet:
@@ -122,15 +98,21 @@ def create_chat(
                 detail="Pet not found"
             )
 
-        # Уточняем поиск существующего чата с учетом питомца
-        existing_chat = existing_chat.filter(Chat.pet_id == chat_in.pet_id)
+    existing_chat_query = db.query(Chat).filter(
+        or_(
+            and_(Chat.user1_id == current_user.id, Chat.user2_id == chat_in.user2_id),
+            and_(Chat.user1_id == chat_in.user2_id, Chat.user2_id == current_user.id)
+        )
+    )
 
-    existing_chat = existing_chat.first()
+    if chat_in.pet_id:
+        existing_chat_query = existing_chat_query.filter(Chat.pet_id == chat_in.pet_id)
+
+    existing_chat = existing_chat_query.first()
 
     if existing_chat:
         return existing_chat
 
-    # Создаем новый чат
     db_chat = Chat(
         user1_id=current_user.id,
         user2_id=chat_in.user2_id,
@@ -150,10 +132,6 @@ def create_chat_and_send_first_message(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Create a chat with the pet owner and send the first message
-    """
-    # Находим питомца и его владельца
     pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if not pet:
         raise HTTPException(
@@ -161,14 +139,12 @@ def create_chat_and_send_first_message(
             detail="Pet not found"
         )
 
-    # Проверяем, что пользователь не пытается написать самому себе
     if pet.owner_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot create chat with yourself"
         )
 
-    # Ищем существующий чат или создаем новый
     existing_chat = db.query(Chat).filter(
         or_(
             and_(Chat.user1_id == current_user.id, Chat.user2_id == pet.owner_id, Chat.pet_id == pet_id),
@@ -179,7 +155,6 @@ def create_chat_and_send_first_message(
     if existing_chat:
         chat = existing_chat
     else:
-        # Создаем новый чат
         chat = Chat(
             user1_id=current_user.id,
             user2_id=pet.owner_id,
@@ -189,7 +164,6 @@ def create_chat_and_send_first_message(
         db.commit()
         db.refresh(chat)
 
-    # Создаем и отправляем первое сообщение
     message = ChatMessage(
         chat_id=chat.id,
         sender_id=current_user.id,
@@ -198,7 +172,6 @@ def create_chat_and_send_first_message(
     )
     db.add(message)
 
-    # Обновляем время последней активности чата
     chat.updated_at = datetime.utcnow()
     db.add(chat)
     db.commit()
@@ -217,9 +190,6 @@ def get_chat(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Get a specific chat
-    """
     chat = db.query(Chat).filter(Chat.id == chat_id).first()
     if not chat:
         raise HTTPException(
@@ -227,7 +197,6 @@ def get_chat(
             detail="Chat not found"
         )
 
-    # Проверка, что пользователь имеет доступ к чату
     if chat.user1_id != current_user.id and chat.user2_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -245,9 +214,6 @@ def get_chat_messages(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Get messages from a specific chat
-    """
     chat = db.query(Chat).filter(Chat.id == chat_id).first()
     if not chat:
         raise HTTPException(
@@ -255,19 +221,16 @@ def get_chat_messages(
             detail="Chat not found"
         )
 
-    # Проверка, что пользователь имеет доступ к чату
     if chat.user1_id != current_user.id and chat.user2_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
 
-    # Получение сообщений - изменен порядок на возрастающий по дате (старые сверху, новые снизу)
     messages = db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id
     ).order_by(ChatMessage.created_at.asc()).offset(skip).limit(limit).all()
 
-    # Отметить все сообщения от другого пользователя как прочитанные
     db.query(ChatMessage).filter(
         ChatMessage.chat_id == chat_id,
         ChatMessage.sender_id != current_user.id,
@@ -284,9 +247,6 @@ def delete_chat(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    """
-    Delete a chat
-    """
     chat = db.query(Chat).filter(Chat.id == chat_id).first()
     if not chat:
         raise HTTPException(
@@ -294,14 +254,12 @@ def delete_chat(
             detail="Chat not found"
         )
 
-    # Проверка, что пользователь имеет доступ к чату
     if chat.user1_id != current_user.id and chat.user2_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
 
-    # Удаление чата (каскадное удаление сообщений настроено в модели)
     db.delete(chat)
     db.commit()
 
