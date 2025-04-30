@@ -1,4 +1,3 @@
-# app/api/endpoints/pets.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
@@ -59,16 +58,14 @@ def get_found_pets(
     if species:
         query = query.filter(Pet.species == species)
 
-    # Получаем найденных питомцев с фотографиями
     pets = (query
             .options(joinedload(Pet.photos))
-            .options(joinedload(Pet.found_locations))  # Добавляем подгрузку координат
+            .options(joinedload(Pet.found_locations))
             .order_by(Pet.created_at.desc())
             .offset(skip)
             .limit(limit)
             .all())
 
-    # Заполняем координаты для каждого питомца из связанной таблицы found_locations
     for pet in pets:
         if pet.found_locations and len(pet.found_locations) > 0:
             pet.coordX = pet.found_locations[0].coordX
@@ -85,7 +82,8 @@ def get_found_pet(
     pet = (db.query(Pet)
            .filter(Pet.id == pet_id, Pet.status == PetStatus.FOUND)
            .options(joinedload(Pet.photos))
-           .options(joinedload(Pet.found_locations))  # Добавляем подгрузку координат
+           .options(joinedload(Pet.found_locations))
+           .options(joinedload(Pet.owner))
            .first())
     if not pet:
         raise HTTPException(
@@ -93,12 +91,14 @@ def get_found_pet(
             detail="Pet not found"
         )
 
-    # Заполняем координаты из связанной таблицы found_locations
     if pet.found_locations and len(pet.found_locations) > 0:
         pet.coordX = pet.found_locations[0].coordX
         pet.coordY = pet.found_locations[0].coordY
 
+    pet.owner_phone = pet.owner.phone if pet.owner else None
+
     return pet
+
 
 @router.get("/lost/{pet_id}", response_model=PetSchema)
 def get_lost_pet(
@@ -108,12 +108,16 @@ def get_lost_pet(
     pet = (db.query(Pet)
            .filter(Pet.id == pet_id, Pet.status == PetStatus.LOST)
            .options(joinedload(Pet.photos))
+           .options(joinedload(Pet.owner))
            .first())
     if not pet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pet not found"
         )
+
+    pet.owner_phone = pet.owner.phone if pet.owner else None
+
     return pet
 
 
@@ -408,7 +412,6 @@ async def search_pets(
         )
 
     if save:
-        # Создаем новую запись о питомце без координат в основной таблице
         db_pet = Pet(
             name=f"Found {species.capitalize()}",
             species=species,
@@ -424,7 +427,6 @@ async def search_pets(
         db.commit()
         db.refresh(db_pet)
 
-        # Добавляем фото питомца
         db_photo = PetPhoto(
             pet_id=db_pet.id,
             photo_url=found_pet_photo_url,
@@ -432,7 +434,6 @@ async def search_pets(
         )
         db.add(db_photo)
 
-        # Создаем запись о координатах найденного питомца
         db_found_pet = FoundPet(
             pet_id=db_pet.id,
             coordX=coordX,

@@ -96,6 +96,7 @@ class Pet(PetBase):
     owner_id: int
     coordX: Optional[str] = None
     coordY: Optional[str] = None
+    owner_phone: Optional[str] = None
 
     class Config:
         from_attributes = True
