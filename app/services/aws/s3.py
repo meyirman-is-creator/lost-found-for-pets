@@ -27,6 +27,7 @@ class S3Client:
         try:
             if isinstance(file_obj, bytes):
                 file_obj = BytesIO(file_obj)
+                file_obj.seek(0)
 
             self.s3.upload_fileobj(
                 file_obj,
@@ -46,6 +47,7 @@ class S3Client:
 
             image_data = base64.b64decode(base64_string)
             file_obj = BytesIO(image_data)
+            file_obj.seek(0)
 
             if file_name is None:
                 file_name = f"{uuid.uuid4()}.jpg"

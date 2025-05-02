@@ -1,3 +1,4 @@
+# app/api/endpoints/pets.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
@@ -20,6 +21,7 @@ from app.schemas.schemas import (
 from app.services.aws.s3 import s3_client
 from app.services.cv.similarity import similarity_service
 from app.core.config import settings
+from app.services.email_service import email_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -411,6 +413,7 @@ async def search_pets(
             detail="Failed to upload photo"
         )
 
+    found_pet_id = None
     if save:
         db_pet = Pet(
             name=f"Found {species.capitalize()}",
@@ -426,6 +429,7 @@ async def search_pets(
         db.add(db_pet)
         db.commit()
         db.refresh(db_pet)
+        found_pet_id = db_pet.id
 
         db_photo = PetPhoto(
             pet_id=db_pet.id,
@@ -464,7 +468,6 @@ async def search_pets(
         return {"matches": []}
 
     similarity_results = []
-
     similarity_threshold = 0.35
 
     for pet in potential_matches:
@@ -491,9 +494,74 @@ async def search_pets(
                         similarity_score=similarity_score
                     )
                 )
+
+                # Create a pet match record and notification for each match
+                if save and found_pet_id:
+                    # Create pet match record
+                    match = PetMatch(
+                        found_pet_id=found_pet_id,
+                        lost_pet_id=pet.id,
+                        similarity_score=float(similarity_score)
+                    )
+                    db.add(match)
+                    db.flush()  # Get the ID without committing
+
+                    # Format the similarity as a percentage
+                    similarity_percentage = f"{similarity_score * 100:.1f}%"
+
+                    # Create notification for the lost pet owner
+                    notification_message = (
+                        f"Кто-то нашел животное, похожее на вашего питомца {pet.name}! "
+                        f"Они забирают животное. Сходство: {similarity_percentage}. "
+                        f"Посмотрите детали и свяжитесь с нашедшим."
+                    )
+
+                    notification = Notification(
+                        user_id=pet.owner_id,
+                        match_id=match.id,
+                        message=notification_message
+                    )
+                    db.add(notification)
+
+                    # Also create a notification for the finder
+                    finder_notification_message = (
+                        f"Найдено возможное совпадение для животного, которое вы нашли! "
+                        f"Сходство с питомцем '{pet.name}': {similarity_percentage}. "
+                        f"Посмотрите детали и свяжитесь с владельцем."
+                    )
+
+                    finder_notification = Notification(
+                        user_id=current_user.id,
+                        match_id=match.id,
+                        message=finder_notification_message
+                    )
+                    db.add(finder_notification)
+
+                    # Try to send email notification to the pet owner
+                    try:
+                        pet_owner = db.query(User).filter(User.id == pet.owner_id).first()
+                        if pet_owner and pet_owner.email:
+                            location_info = f"в районе с координатами {coordX}, {coordY}" if coordX and coordY else ""
+                            email_service.send_match_notification_email(
+                                pet_owner.email,
+                                pet.name,
+                                similarity_score,
+                                location_info
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to send email notification: {e}")
+
         except Exception as e:
             logger.error(f"Error computing similarity for pet {pet.id}: {e}")
             continue
+
+    # Commit all the notification records
+    if similarity_results and save:
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error saving notifications: {e}")
+            db.rollback()
 
     similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)
 
