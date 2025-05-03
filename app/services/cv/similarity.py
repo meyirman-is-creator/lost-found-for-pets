@@ -177,7 +177,7 @@ class PetSimilarityService:
             final_score = 0.35 + (adjusted_score * 0.65)
 
             logger.info(f"Raw similarity: {similarity_score:.4f}, Final score: {final_score:.4f}")
-            return float(final_score)
+            return float(similarity_score)
         except Exception as e:
             logger.error(f"Error computing similarity: {e}")
             return 0.35
