@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import Any, List, Optional
 from datetime import datetime
 import json
@@ -36,7 +37,8 @@ def get_lost_pets(
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
     if species:
-        query = query.filter(Pet.species == species.lower())
+        species = species.lower().strip()
+        query = query.filter(func.lower(Pet.species) == species)
 
     pets = (query
             .options(joinedload(Pet.photos))
@@ -57,7 +59,8 @@ def get_found_pets(
     query = db.query(Pet).filter(Pet.status == PetStatus.FOUND)
 
     if species:
-        query = query.filter(Pet.species == species.lower())
+        species = species.lower().strip()
+        query = query.filter(func.lower(Pet.species) == species)
 
     pets = (query
             .options(joinedload(Pet.photos))
@@ -147,13 +150,18 @@ async def create_pet(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
+    species = species.lower().strip() if species else species
+    breed = breed.lower().strip() if breed else breed
+    color = color.lower().strip() if color else color
+    gender = gender.lower().strip() if gender else gender
+
     db_pet = Pet(
         name=name,
-        species=species.lower() if species else None,
-        breed=breed.lower() if breed else None,
+        species=species,
+        breed=breed,
         age=age,
-        color=color.lower() if color else None,
-        gender=gender.lower() if gender else None,
+        color=color,
+        gender=gender,
         distinctive_features=distinctive_features,
         status=PetStatus.HOME,
         owner_id=current_user.id
@@ -211,14 +219,15 @@ def update_pet(
     original_status = pet.status
 
     update_data = pet_in.dict(exclude_unset=True)
+
     if 'species' in update_data and update_data['species']:
-        update_data['species'] = update_data['species'].lower()
+        update_data['species'] = update_data['species'].lower().strip()
     if 'breed' in update_data and update_data['breed']:
-        update_data['breed'] = update_data['breed'].lower()
+        update_data['breed'] = update_data['breed'].lower().strip()
     if 'color' in update_data and update_data['color']:
-        update_data['color'] = update_data['color'].lower()
+        update_data['color'] = update_data['color'].lower().strip()
     if 'gender' in update_data and update_data['gender']:
-        update_data['gender'] = update_data['gender'].lower()
+        update_data['gender'] = update_data['gender'].lower().strip()
 
     for key, value in update_data.items():
         setattr(pet, key, value)
@@ -409,23 +418,22 @@ async def search_pets(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    def is_valid_string(value: Optional[str]) -> bool:
-        return value is not None and value.strip() != "" and value.lower() != "null"
-
-    def normalize_string(value: Optional[str]) -> Optional[str]:
-        if is_valid_string(value):
-            return value.strip().lower()
-        return None
-
-    species = normalize_string(species)
-    color = normalize_string(color)
-    gender = normalize_string(gender)
-    breed = normalize_string(breed)
-    coordX = coordX if is_valid_string(coordX) else None
-    coordY = coordY if is_valid_string(coordY) else None
+    species = species.lower().strip()
+    color = color.lower().strip()
 
     logger.info(f"Search request from user {current_user.id}: species={species}, color={color}, "
                 f"gender={gender}, breed={breed}, save={save}, coordX={coordX}, coordY={coordY}")
+
+    def is_valid_string(value: Optional[str]) -> bool:
+        return value is not None and value.strip() != "" and value.lower() != "null"
+
+    coordX = coordX if is_valid_string(coordX) else None
+    coordY = coordY if is_valid_string(coordY) else None
+    gender = gender.lower().strip() if is_valid_string(gender) else None
+    breed = breed.lower().strip() if is_valid_string(breed) else None
+
+    logger.info(f"Normalized parameters: species={species}, color={color}, "
+                f"gender={gender}, breed={breed}, coordX={coordX}, coordY={coordY}")
 
     if save and (coordX is None or coordY is None):
         raise HTTPException(
@@ -451,7 +459,7 @@ async def search_pets(
     found_pet_id = None
     if save:
         db_pet = Pet(
-            name=f"Found {species.capitalize() if species else 'Pet'}",
+            name=f"Found {species.capitalize()}",
             species=species,
             breed=breed,
             color=color,
@@ -484,20 +492,18 @@ async def search_pets(
 
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
-    if species:
-        query = query.filter(Pet.species == species)
-        logger.info(f"Filtering by species: {species}")
+    query = query.filter(func.lower(Pet.species) == species)
+    logger.info(f"Filtering by species: {species}")
 
-    if color:
-        query = query.filter(Pet.color.ilike(f"%{color}%"))
-        logger.info(f"Filtering by color: {color}")
+    query = query.filter(func.lower(Pet.color).like(f"%{color}%"))
+    logger.info(f"Filtering by color: {color}")
 
     if gender:
-        query = query.filter(Pet.gender == gender)
+        query = query.filter(func.lower(Pet.gender) == gender)
         logger.info(f"Filtering by gender: {gender}")
 
     if breed:
-        query = query.filter(Pet.breed.ilike(f"%{breed}%"))
+        query = query.filter(func.lower(Pet.breed).like(f"%{breed}%"))
         logger.info(f"Filtering by breed: {breed}")
 
     potential_matches = query.options(joinedload(Pet.photos)).all()
