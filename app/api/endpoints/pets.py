@@ -36,7 +36,7 @@ def get_lost_pets(
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
     if species:
-        query = query.filter(Pet.species == species)
+        query = query.filter(Pet.species == species.lower())
 
     pets = (query
             .options(joinedload(Pet.photos))
@@ -57,7 +57,7 @@ def get_found_pets(
     query = db.query(Pet).filter(Pet.status == PetStatus.FOUND)
 
     if species:
-        query = query.filter(Pet.species == species)
+        query = query.filter(Pet.species == species.lower())
 
     pets = (query
             .options(joinedload(Pet.photos))
@@ -149,11 +149,11 @@ async def create_pet(
 ) -> Any:
     db_pet = Pet(
         name=name,
-        species=species,
-        breed=breed,
+        species=species.lower() if species else None,
+        breed=breed.lower() if breed else None,
         age=age,
-        color=color,
-        gender=gender,
+        color=color.lower() if color else None,
+        gender=gender.lower() if gender else None,
         distinctive_features=distinctive_features,
         status=PetStatus.HOME,
         owner_id=current_user.id
@@ -210,7 +210,17 @@ def update_pet(
 
     original_status = pet.status
 
-    for key, value in pet_in.dict(exclude_unset=True).items():
+    update_data = pet_in.dict(exclude_unset=True)
+    if 'species' in update_data and update_data['species']:
+        update_data['species'] = update_data['species'].lower()
+    if 'breed' in update_data and update_data['breed']:
+        update_data['breed'] = update_data['breed'].lower()
+    if 'color' in update_data and update_data['color']:
+        update_data['color'] = update_data['color'].lower()
+    if 'gender' in update_data and update_data['gender']:
+        update_data['gender'] = update_data['gender'].lower()
+
+    for key, value in update_data.items():
         setattr(pet, key, value)
 
     if original_status != PetStatus.LOST and pet.status == PetStatus.LOST:
@@ -399,18 +409,23 @@ async def search_pets(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
-    logger.info(f"Search request from user {current_user.id}: species={species}, color={color}, "
-                f"gender={gender}, breed={breed}, save={save}, coordX={coordX}, coordY={coordY}")
-
     def is_valid_string(value: Optional[str]) -> bool:
         return value is not None and value.strip() != "" and value.lower() != "null"
 
+    def normalize_string(value: Optional[str]) -> Optional[str]:
+        if is_valid_string(value):
+            return value.strip().lower()
+        return None
+
+    species = normalize_string(species)
+    color = normalize_string(color)
+    gender = normalize_string(gender)
+    breed = normalize_string(breed)
     coordX = coordX if is_valid_string(coordX) else None
     coordY = coordY if is_valid_string(coordY) else None
-    gender = gender if is_valid_string(gender) else None
-    breed = breed if is_valid_string(breed) else None
 
-    logger.info(f"Normalized parameters: gender={gender}, breed={breed}, coordX={coordX}, coordY={coordY}")
+    logger.info(f"Search request from user {current_user.id}: species={species}, color={color}, "
+                f"gender={gender}, breed={breed}, save={save}, coordX={coordX}, coordY={coordY}")
 
     if save and (coordX is None or coordY is None):
         raise HTTPException(
@@ -436,7 +451,7 @@ async def search_pets(
     found_pet_id = None
     if save:
         db_pet = Pet(
-            name=f"Found {species.capitalize()}",
+            name=f"Found {species.capitalize() if species else 'Pet'}",
             species=species,
             breed=breed,
             color=color,
@@ -469,11 +484,13 @@ async def search_pets(
 
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
-    query = query.filter(Pet.species == species)
-    logger.info(f"Filtering by species: {species}")
+    if species:
+        query = query.filter(Pet.species == species)
+        logger.info(f"Filtering by species: {species}")
 
-    query = query.filter(Pet.color.ilike(f"%{color}%"))
-    logger.info(f"Filtering by color: {color}")
+    if color:
+        query = query.filter(Pet.color.ilike(f"%{color}%"))
+        logger.info(f"Filtering by color: {color}")
 
     if gender:
         query = query.filter(Pet.gender == gender)
