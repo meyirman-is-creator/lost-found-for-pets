@@ -1,11 +1,9 @@
-# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from app.db.database import engine, Base
 from app.core.config import settings
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -14,10 +12,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Создание таблиц в базе данных
 Base.metadata.create_all(bind=engine)
 
-# Создание приложения с другим именем переменной (не app, чтобы избежать конфликта с модулем)
 fastapi_app = FastAPI(
     title=settings.PROJECT_NAME,
     description=settings.PROJECT_DESCRIPTION,
@@ -27,26 +23,21 @@ fastapi_app = FastAPI(
     redoc_url=f"{settings.API_V1_STR}/redoc",
 )
 
-# Настройка CORS
 fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене замените на конкретные домены
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Пытаемся загрузить настоящий сервис, а если не получится - используем заглушку
 try:
     import tensorflow as tf
     from app.services.cv.similarity import similarity_service
     logger.info("TensorFlow loaded successfully")
 except ImportError:
     logger.warning("TensorFlow not properly installed. Using dummy similarity service.")
-    # Опционально - заглушка для similarity_service может быть создана здесь, если необходимо
-    # Но лучше обработать это в самом модуле similarity.py
 
-# Загружаем маршруты API
 try:
     from app.api.api import api_router
     fastapi_app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -58,9 +49,6 @@ except Exception as e:
 
 @fastapi_app.get("/")
 def root():
-    """
-    Root endpoint to check if the API is running
-    """
     return {
         "message": f"Welcome to {settings.PROJECT_NAME} {settings.PROJECT_VERSION}",
         "docs": f"{settings.API_V1_STR}/docs"
@@ -68,12 +56,8 @@ def root():
 
 @fastapi_app.get("/health")
 def health_check():
-    """
-    Health check endpoint
-    """
     return {"status": "ok"}
 
-# Важно: экспортируем приложение как 'app' для uvicorn
 app = fastapi_app
 
 if __name__ == "__main__":

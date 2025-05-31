@@ -39,9 +39,11 @@ class PetSimilarityService:
         self.bucket_name = settings.AWS_BUCKET_NAME
 
         if not TENSORFLOW_AVAILABLE:
+            logger.warning("TensorFlow not available, similarity service will return default values")
             return
 
         try:
+            logger.info("Loading MobileNetV2 model...")
             self.model = MobileNetV2(weights='imagenet',
                                      include_top=False,
                                      pooling='avg',
@@ -49,12 +51,14 @@ class PetSimilarityService:
 
             for layer in self.model.layers:
                 layer.trainable = False
+            logger.info("MobileNetV2 model loaded successfully")
         except Exception as e:
             logger.error(f"Error loading MobileNetV2 model: {e}")
             self.model = None
 
     def _get_s3_object(self, url):
         try:
+            logger.debug(f"Attempting to download S3 object from URL: {url}")
             if "s3.amazonaws.com" in url:
                 parts = url.split(".amazonaws.com/")
                 if len(parts) > 1:
@@ -64,7 +68,9 @@ class PetSimilarityService:
                     with tempfile.NamedTemporaryFile() as tmp:
                         self.s3_client.download_file(bucket, key, tmp.name)
                         with open(tmp.name, 'rb') as f:
-                            return f.read()
+                            data = f.read()
+                            logger.debug(f"Successfully downloaded S3 object, size: {len(data)} bytes")
+                            return data
             return None
         except Exception as e:
             logger.error(f"Error accessing S3 object: {e}")
@@ -75,11 +81,13 @@ class PetSimilarityService:
             return None
 
         try:
+            logger.debug(f"Downloading image from: {image_url}")
             image_data = None
 
             if "s3.amazonaws.com" in image_url:
                 image_data = self._get_s3_object(image_url)
                 if image_data is None:
+                    logger.error(f"Failed to download S3 image: {image_url}")
                     return None
 
                 img_array = np.asarray(bytearray(image_data), dtype=np.uint8)
@@ -91,10 +99,12 @@ class PetSimilarityService:
                 img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
             if img is None:
+                logger.error(f"Failed to decode image: {image_url}")
                 return None
 
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img_resized = cv2.resize(img_rgb, (224, 224))
+            logger.debug(f"Image processed successfully, shape: {img_resized.shape}")
             return img_resized
         except Exception as e:
             logger.error(f"Error downloading image from {image_url}: {e}")
@@ -134,13 +144,18 @@ class PetSimilarityService:
             with tf.device('/CPU:0'):
                 embedding = self.model.predict(img_array, verbose=0)
 
-            return embedding / np.linalg.norm(embedding)
+            normalized_embedding = embedding / np.linalg.norm(embedding)
+            logger.debug(f"Generated embedding with shape: {normalized_embedding.shape}")
+            return normalized_embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             return None
 
     def compute_similarity(self, img1_source, img2_source):
+        logger.info(f"Computing similarity between images")
+
         if not TENSORFLOW_AVAILABLE or self.model is None:
+            logger.warning("TensorFlow not available, returning default similarity score")
             return 0.5
 
         try:
@@ -167,13 +182,9 @@ class PetSimilarityService:
 
             similarity_score = cosine_similarity(img1_embedding, img2_embedding)[0][0]
 
-            # Adjust the similarity scale to provide more meaningful results
-            # Scale from range [0.5-1.0] to [0.0-1.0] for more intuitive scoring
             adjusted_score = (similarity_score - 0.5) * 2
             adjusted_score = max(0.0, min(1.0, adjusted_score))
 
-            # Add 0.35 as base similarity for pets of the same species and color
-            # This will ensure that we still get matches even if visual features don't match well
             final_score = 0.35 + (adjusted_score * 0.65)
 
             logger.info(f"Raw similarity: {similarity_score:.4f}, Final score: {final_score:.4f}")

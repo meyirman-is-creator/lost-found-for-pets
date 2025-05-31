@@ -1,4 +1,3 @@
-# app/services/aws/s3.py
 import boto3
 import logging
 from botocore.exceptions import ClientError
@@ -35,7 +34,9 @@ class S3Client:
                 file_name,
                 ExtraArgs={"ContentType": content_type}
             )
-            return f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_name}"
+            url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_name}"
+            logger.info(f"Successfully uploaded file to S3: {url}")
+            return url
         except Exception as e:
             logger.error(f"Error uploading file to S3: {e}")
             return None
@@ -59,11 +60,26 @@ class S3Client:
 
     def delete_file(self, file_url):
         try:
-            file_key = file_url.split("/")[-1]
+            if not file_url:
+                return True
+
+            if self.bucket_name in file_url:
+                file_key = file_url.split("/")[-1]
+            else:
+                file_key = file_url
+
             self.s3.delete_object(Bucket=self.bucket_name, Key=file_key)
+            logger.info(f"Successfully deleted file from S3: {file_key}")
             return True
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'AccessDenied':
+                logger.error(f"Access denied when deleting file from S3: {e}")
+            else:
+                logger.error(f"Error deleting file from S3: {e}")
+            return False
         except Exception as e:
-            logger.error(f"Error deleting file from S3: {e}")
+            logger.error(f"Unexpected error deleting file from S3: {e}")
             return False
 
     def get_file(self, file_key):

@@ -1,4 +1,3 @@
-# app/api/endpoints/pets.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Any, List, Optional
@@ -340,7 +339,10 @@ def delete_pet_photo(
             db.add(next_photo)
 
     if photo.photo_url:
-        s3_client.delete_file(photo.photo_url)
+        try:
+            s3_client.delete_file(photo.photo_url)
+        except Exception as e:
+            logger.warning(f"Failed to delete photo from S3: {e}")
 
     db.delete(photo)
     db.commit()
@@ -365,7 +367,10 @@ def delete_pet(
 
     for photo in photos:
         if photo.photo_url:
-            s3_client.delete_file(photo.photo_url)
+            try:
+                s3_client.delete_file(photo.photo_url)
+            except Exception as e:
+                logger.warning(f"Failed to delete photo from S3: {e}")
 
     try:
         db.delete(pet)
@@ -394,6 +399,19 @@ async def search_pets(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_verified_user)
 ) -> Any:
+    logger.info(f"Search request from user {current_user.id}: species={species}, color={color}, "
+                f"gender={gender}, breed={breed}, save={save}, coordX={coordX}, coordY={coordY}")
+
+    def is_valid_string(value: Optional[str]) -> bool:
+        return value is not None and value.strip() != "" and value.lower() != "null"
+
+    coordX = coordX if is_valid_string(coordX) else None
+    coordY = coordY if is_valid_string(coordY) else None
+    gender = gender if is_valid_string(gender) else None
+    breed = breed if is_valid_string(breed) else None
+
+    logger.info(f"Normalized parameters: gender={gender}, breed={breed}, coordX={coordX}, coordY={coordY}")
+
     if save and (coordX is None or coordY is None):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -412,6 +430,8 @@ async def search_pets(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload photo"
         )
+
+    logger.info(f"Photo uploaded successfully: {found_pet_photo_url}")
 
     found_pet_id = None
     if save:
@@ -445,26 +465,37 @@ async def search_pets(
         )
         db.add(db_found_pet)
         db.commit()
+        logger.info(f"Found pet saved with ID: {found_pet_id}")
 
     query = db.query(Pet).filter(Pet.status == PetStatus.LOST)
 
     query = query.filter(Pet.species == species)
+    logger.info(f"Filtering by species: {species}")
 
     query = query.filter(Pet.color.ilike(f"%{color}%"))
+    logger.info(f"Filtering by color: {color}")
 
     if gender:
         query = query.filter(Pet.gender == gender)
+        logger.info(f"Filtering by gender: {gender}")
 
     if breed:
         query = query.filter(Pet.breed.ilike(f"%{breed}%"))
+        logger.info(f"Filtering by breed: {breed}")
 
     potential_matches = query.options(joinedload(Pet.photos)).all()
 
     logger.info(f"Found {len(potential_matches)} potential matches after filtering")
 
+    if potential_matches:
+        logger.info("Pet IDs of potential matches: " + ", ".join([str(pet.id) for pet in potential_matches]))
+
     if not potential_matches:
         if not save:
-            s3_client.delete_file(found_pet_photo_url)
+            try:
+                s3_client.delete_file(found_pet_photo_url)
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary photo: {e}")
         return {"matches": []}
 
     similarity_results = []
@@ -476,9 +507,11 @@ async def search_pets(
             pet_photos = [pet.photos[0]]
 
         if not pet_photos:
+            logger.warning(f"Pet {pet.id} has no photos, skipping")
             continue
 
         pet_photo_url = pet_photos[0].photo_url
+        logger.info(f"Computing similarity for pet {pet.id} with photo: {pet_photo_url}")
 
         try:
             similarity_score = similarity_service.compute_similarity(
@@ -495,21 +528,17 @@ async def search_pets(
                     )
                 )
 
-                # Create a pet match record and notification for each match
                 if save and found_pet_id:
-                    # Create pet match record
                     match = PetMatch(
                         found_pet_id=found_pet_id,
                         lost_pet_id=pet.id,
                         similarity_score=float(similarity_score)
                     )
                     db.add(match)
-                    db.flush()  # Get the ID without committing
+                    db.flush()
 
-                    # Format the similarity as a percentage
                     similarity_percentage = f"{similarity_score * 100:.1f}%"
 
-                    # Create notification for the lost pet owner
                     notification_message = (
                         f"Кто-то нашел животное, похожее на вашего питомца {pet.name}! "
                         f"Они забирают животное. Сходство: {similarity_percentage}. "
@@ -523,7 +552,6 @@ async def search_pets(
                     )
                     db.add(notification)
 
-                    # Also create a notification for the finder
                     finder_notification_message = (
                         f"Найдено возможное совпадение для животного, которое вы нашли! "
                         f"Сходство с питомцем '{pet.name}': {similarity_percentage}. "
@@ -537,7 +565,6 @@ async def search_pets(
                     )
                     db.add(finder_notification)
 
-                    # Try to send email notification to the pet owner
                     try:
                         pet_owner = db.query(User).filter(User.id == pet.owner_id).first()
                         if pet_owner and pet_owner.email:
@@ -555,7 +582,6 @@ async def search_pets(
             logger.error(f"Error computing similarity for pet {pet.id}: {e}")
             continue
 
-    # Commit all the notification records
     if similarity_results and save:
         try:
             db.commit()
@@ -565,7 +591,12 @@ async def search_pets(
 
     similarity_results.sort(key=lambda x: x.similarity_score, reverse=True)
 
+    logger.info(f"Returning {len(similarity_results)} matches with scores above threshold")
+
     if not save:
-        s3_client.delete_file(found_pet_photo_url)
+        try:
+            s3_client.delete_file(found_pet_photo_url)
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary photo: {e}")
 
     return {"matches": similarity_results}
