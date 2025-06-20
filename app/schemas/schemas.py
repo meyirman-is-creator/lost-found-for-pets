@@ -210,6 +210,7 @@ class ChatMessage(ChatMessageBase):
     whoid: Optional[int] = None
     is_read: bool
     created_at: datetime
+    sender_name: Optional[str] = None
 
     class Config:
         from_attributes = True
