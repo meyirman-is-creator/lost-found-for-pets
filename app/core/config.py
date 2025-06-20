@@ -17,10 +17,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-    # Database
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/lostpets_db")
-    DATABASE_URL_LOCAL: str = os.getenv("DATABASE_URL_LOCAL",
-                                        "postgresql://postgres:postgres@localhost:5432/lostpets_db")
+    # Database - Railway предоставляет DATABASE_URL автоматически
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/lostpets_db")
+    DATABASE_URL_LOCAL: str = os.getenv("DATABASE_URL_LOCAL", "postgresql://postgres:postgres@localhost:5432/lostpets_db")
 
     # AWS
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
@@ -29,7 +28,7 @@ class Settings(BaseSettings):
     AWS_BUCKET_NAME: str = os.getenv("AWS_BUCKET_NAME", "lostpets-images")
 
     # Similarity threshold for pet matching
-    SIMILARITY_THRESHOLD: float = 0.35  # Снижено с 0.5 для более широкого охвата
+    SIMILARITY_THRESHOLD: float = 0.35
 
     # Email verification settings
     VERIFICATION_CODE_EXPIRE_MINUTES: int = 15
@@ -41,7 +40,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
-        extra = "ignore"  # Позволяет игнорировать дополнительные входные данные
+        extra = "ignore"
 
 
 settings = Settings()

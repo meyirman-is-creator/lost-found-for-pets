@@ -4,14 +4,13 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 import os
 
-# Определяем, запущено ли приложение в Docker или локально
-in_docker = os.environ.get('DOCKER_ENV', False)
+# Для Railway всегда используем DATABASE_URL
+# Railway автоматически устанавливает эту переменную
+db_url = os.getenv("DATABASE_URL", settings.DATABASE_URL)
 
-# Выбираем соответствующий URL для подключения к базе данных
-if in_docker:
-    db_url = settings.DATABASE_URL
-else:
-    db_url = settings.DATABASE_URL_LOCAL
+# Railway использует postgres://, но SQLAlchemy требует postgresql://
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 # Создаем подключение к базе данных
 engine = create_engine(db_url)
