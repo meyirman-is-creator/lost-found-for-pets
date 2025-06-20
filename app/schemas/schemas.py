@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum
+import re
 
 
 class PetStatus(str, Enum):
@@ -17,19 +18,67 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str
+    password: str = Field(..., min_length=8, max_length=100)
+    full_name: str = Field(..., min_length=2, max_length=100)
+    phone: str = Field(..., min_length=10, max_length=20)
 
     @validator('password')
     def password_strength(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
         return v
+
+    @validator('phone')
+    def phone_validation(cls, v):
+        # Remove spaces and hyphens
+        cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        # Check if it starts with + and contains only digits after that
+        if not re.match(r'^\+?\d{10,15}$', cleaned):
+            raise ValueError('Invalid phone number format')
+        return cleaned
+
+    @validator('full_name')
+    def name_validation(cls, v):
+        if not v or len(v.strip()) < 2:
+            raise ValueError('Full name must be at least 2 characters long')
+        if not re.match(r'^[a-zA-Z\s\-\']+$', v):
+            raise ValueError('Full name can only contain letters, spaces, hyphens and apostrophes')
+        return v.strip()
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
-    password: Optional[str] = None
+    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    phone: Optional[str] = Field(None, min_length=10, max_length=20)
+    password: Optional[str] = Field(None, min_length=8, max_length=100)
+
+    @validator('password')
+    def password_strength(cls, v):
+        if v is None:
+            return v
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+    @validator('phone')
+    def phone_validation(cls, v):
+        if v is None:
+            return v
+        cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        if not re.match(r'^\+?\d{10,15}$', cleaned):
+            raise ValueError('Invalid phone number format')
+        return cleaned
 
 
 class User(UserBase):
@@ -163,12 +212,20 @@ class TokenData(BaseModel):
 
 class Login(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1)
+
+    @validator('email')
+    def email_lowercase(cls, v):
+        return v.lower()
 
 
 class VerificationRequest(BaseModel):
     email: EmailStr
-    code: str
+    code: str = Field(..., regex=r'^\d{6}$')
+
+    @validator('email')
+    def email_lowercase(cls, v):
+        return v.lower()
 
 
 class FoundPetInfo(BaseModel):

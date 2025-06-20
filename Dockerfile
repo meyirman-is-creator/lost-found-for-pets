@@ -4,7 +4,6 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Установка системных зависимостей для OpenCV, PostgreSQL и TensorFlow
-# Добавлен curl для healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -20,50 +19,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Копирование requirements.txt
 COPY requirements.txt .
 
-# Установка uvicorn с поддержкой websockets и SQLAlchemy сначала
+# Установка Python зависимостей
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3 sqlalchemy>=2.0.0
+    pip install --no-cache-dir -r requirements.txt
 
-# Установка TensorFlow и связанных библиотек
-RUN pip install --no-cache-dir \
-    tensorflow==2.15.0 \
-    scikit-learn==1.0.2 \
-    Pillow==9.5.0 \
-    scipy==1.10.1 \
-    numpy==1.24.3
-
-# Установка остальных зависимостей из requirements.txt
-RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
-
-# Копирование исходного кода приложения
+# Копирование всего проекта
 COPY . .
 
-# Переменная окружения для использования CPU вместо GPU
+# Создаем скрипт для запуска приложения
+RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
+    echo 'set -e' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# Ждем готовности базы данных' >> /app/entrypoint.sh && \
+    echo 'echo "Waiting for database..."' >> /app/entrypoint.sh && \
+    echo 'while ! pg_isready -h db -p 5432 -U postgres; do' >> /app/entrypoint.sh && \
+    echo '  sleep 1' >> /app/entrypoint.sh && \
+    echo 'done' >> /app/entrypoint.sh && \
+    echo 'echo "Database is ready!"' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# Запускаем миграции' >> /app/entrypoint.sh && \
+    echo 'echo "Running migrations..."' >> /app/entrypoint.sh && \
+    echo 'python create_tables.py || echo "Tables already exist"' >> /app/entrypoint.sh && \
+    echo 'python add_chat_tables.py || echo "Chat tables already exist"' >> /app/entrypoint.sh && \
+    echo 'python simplified_add_chat_tables.py || echo "Simplified chat tables already exist"' >> /app/entrypoint.sh && \
+    echo 'python update_user_status_fields.py || echo "User status fields already exist"' >> /app/entrypoint.sh && \
+    echo 'python create_founded_pets_table.py || echo "Founded pets table already exist"' >> /app/entrypoint.sh && \
+    echo 'echo "All migrations completed!"' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# Запускаем приложение' >> /app/entrypoint.sh && \
+    echo 'echo "Starting FastAPI application..."' >> /app/entrypoint.sh && \
+    echo 'uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-use-colors' >> /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+# Устанавливаем pg_isready для проверки готовности базы данных
+RUN apt-get update && apt-get install -y postgresql-client && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Переменные окружения для TensorFlow
 ENV CUDA_VISIBLE_DEVICES="-1"
 ENV TF_FORCE_GPU_ALLOW_GROWTH="true"
 ENV TF_CPP_MIN_LOG_LEVEL="2"
 ENV PYTHONUNBUFFERED=1
 ENV DOCKER_ENV="true"
 
-# Установка переменной порта с значением по умолчанию
-ENV PORT=8000
-
 # Порт для FastAPI
 EXPOSE 8000
 
-# Запуск всех миграций перед запуском приложения
-# Создаем единый скрипт для запуска всех миграций с безопасной проверкой
-RUN echo '#!/bin/bash' > /app/run_migrations.sh && \
-    echo 'set -e' >> /app/run_migrations.sh && \
-    echo 'python create_tables.py' >> /app/run_migrations.sh && \
-    echo 'python add_chat_tables.py' >> /app/run_migrations.sh && \
-    echo 'python simplified_add_chat_tables.py' >> /app/run_migrations.sh && \
-    echo 'python update_user_status_fields.py' >> /app/run_migrations.sh && \
-    echo 'python create_founded_pets_table.py' >> /app/run_migrations.sh && \
-    echo 'echo "All migrations completed successfully"' >> /app/run_migrations.sh && \
-    chmod +x /app/run_migrations.sh
-
-# Запуск миграций и приложения
-CMD /app/run_migrations.sh && \
-    python -c "import os; print('Starting app with DOCKER_ENV=', os.environ.get('DOCKER_ENV'))" && \
-    uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-use-colors
+# Запуск через entrypoint скрипт
+CMD ["/app/entrypoint.sh"]

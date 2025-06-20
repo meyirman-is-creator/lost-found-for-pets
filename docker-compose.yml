@@ -2,32 +2,6 @@
 version: '3.8'
 
 services:
-  api:
-    build: .
-    container_name: lostpets_api
-    restart: always
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/lostpets_db
-      - DOCKER_ENV=true
-      - PORT=8000
-    volumes:
-      - ./app:/app/app
-      - ./add_chat_tables.py:/app/add_chat_tables.py  # Добавлен скрипт миграции
-    networks:
-      - lostpets-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
   db:
     image: postgres:14
     container_name: lostpets_db
@@ -47,6 +21,53 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  api:
+    build: .
+    container_name: lostpets_api
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database settings
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/lostpets_db
+      - DATABASE_URL_LOCAL=postgresql://postgres:postgres@db:5432/lostpets_db
+      - DOCKER_ENV=true
+
+      # Security settings (изменить в продакшене!)
+      - SECRET_KEY=your-secret-key-change-this-in-production
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+      # AWS settings (опциональные - для хранения фото)
+      # Если не указаны, фото будут сохраняться локально
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-lostpets-images}
+
+      # Email settings (опциональные - для отправки писем)
+      # Если не указаны, письма не будут отправляться
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@lostpets.com}
+
+      # Other settings
+      - SIMILARITY_THRESHOLD=0.35
+      - VERIFICATION_CODE_EXPIRE_MINUTES=15
+    networks:
+      - lostpets-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   lostpets-network:
