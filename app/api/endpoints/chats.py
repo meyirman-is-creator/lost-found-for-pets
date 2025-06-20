@@ -316,7 +316,7 @@ def get_chat_messages(
         current_user: User = Depends(get_verified_user)
 ) -> Any:
     logger.info(f"=== GET CHAT MESSAGES ===")
-    logger.info(f"Chat ID: {chat_id}, User ID: {current_user.id}, Skip: {skip}, Limit: {limit}")
+    logger.info(f"Chat ID: {chat_id}, User ID: {current_user.id} ({current_user.email}), Skip: {skip}, Limit: {limit}")
 
     try:
         chat = db.query(Chat).filter(Chat.id == chat_id).first()
@@ -341,12 +341,21 @@ def get_chat_messages(
         logger.info(f"Found {len(messages)} messages in chat {chat_id}")
 
         for i, message in enumerate(messages):
+            # ВАЖНО: whoid - это ID текущего пользователя (для iOS)
             setattr(message, 'whoid', current_user.id)
+
             sender = db.query(User).filter(User.id == message.sender_id).first()
             if sender:
                 setattr(message, 'sender_name', sender.full_name if sender.full_name else f"User {sender.id}")
-                logger.debug(
-                    f"Message {i + 1}: ID={message.id}, Sender={message.sender_id} ({message.sender_name}), Content='{message.content[:30]}...', Read={message.is_read}")
+
+                # Подробный лог каждого сообщения
+                is_my_message = message.sender_id == current_user.id
+                logger.info(f"Message {i + 1}/{len(messages)}:")
+                logger.info(f"  ID: {message.id}")
+                logger.info(f"  Sender: {message.sender_id} ({sender.email}) {'[ME]' if is_my_message else '[OTHER]'}")
+                logger.info(f"  Content: '{message.content}'")
+                logger.info(f"  Read: {message.is_read}")
+                logger.info(f"  Created: {message.created_at}")
 
         # Mark messages as read
         unread_count = db.query(ChatMessage).filter(
@@ -372,7 +381,6 @@ def get_chat_messages(
     except Exception as e:
         logger.error(f"Error getting chat messages: {e}", exc_info=True)
         raise
-
 
 @router.delete("/{chat_id}", response_model=dict)
 def delete_chat(
