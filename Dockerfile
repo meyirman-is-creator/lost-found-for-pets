@@ -1,8 +1,10 @@
+# app/Dockerfile
 FROM python:3.9-slim
 
 WORKDIR /app
 
 # Установка системных зависимостей для OpenCV, PostgreSQL и TensorFlow
+# Добавлен curl для healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -12,81 +14,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     curl \
-    postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Копирование requirements.txt
 COPY requirements.txt .
 
-# Установка Python зависимостей
+# Установка uvicorn с поддержкой websockets и SQLAlchemy сначала
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir "uvicorn[standard]>=0.27.0" websockets>=11.0.3 sqlalchemy>=2.0.0
 
-# Копирование всего проекта
+# Установка TensorFlow и связанных библиотек
+RUN pip install --no-cache-dir \
+    tensorflow==2.15.0 \
+    scikit-learn==1.0.2 \
+    Pillow==9.5.0 \
+    scipy==1.10.1 \
+    numpy==1.24.3
+
+# Установка остальных зависимостей из requirements.txt
+RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
+
+# Копирование исходного кода приложения
 COPY . .
 
-# Создаем универсальный скрипт запуска
-RUN echo '#!/bin/bash' > /app/start.sh && \
-    echo 'set -e' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Функция для проверки подключения к БД' >> /app/start.sh && \
-    echo 'wait_for_db() {' >> /app/start.sh && \
-    echo '    echo "Checking database connection..."' >> /app/start.sh && \
-    echo '    python -c "' >> /app/start.sh && \
-    echo 'import time' >> /app/start.sh && \
-    echo 'import os' >> /app/start.sh && \
-    echo 'from sqlalchemy import create_engine' >> /app/start.sh && \
-    echo 'db_url = os.getenv(\"DATABASE_URL\", \"postgresql://postgres:postgres@localhost:5432/lostpets_db\")' >> /app/start.sh && \
-    echo 'if db_url.startswith(\"postgres://\"):' >> /app/start.sh && \
-    echo '    db_url = db_url.replace(\"postgres://\", \"postgresql://\", 1)' >> /app/start.sh && \
-    echo 'max_retries = 30' >> /app/start.sh && \
-    echo 'for i in range(max_retries):' >> /app/start.sh && \
-    echo '    try:' >> /app/start.sh && \
-    echo '        engine = create_engine(db_url)' >> /app/start.sh && \
-    echo '        with engine.connect() as conn:' >> /app/start.sh && \
-    echo '            conn.execute(\"SELECT 1\")' >> /app/start.sh && \
-    echo '        print(\"Database is ready!\")' >> /app/start.sh && \
-    echo '        break' >> /app/start.sh && \
-    echo '    except Exception as e:' >> /app/start.sh && \
-    echo '        if i == max_retries - 1:' >> /app/start.sh && \
-    echo '            print(f\"Failed to connect to database: {e}\")' >> /app/start.sh && \
-    echo '            exit(1)' >> /app/start.sh && \
-    echo '        print(f\"Waiting for database... ({i+1}/{max_retries})\")' >> /app/start.sh && \
-    echo '        time.sleep(2)' >> /app/start.sh && \
-    echo '"' >> /app/start.sh && \
-    echo '}' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Проверяем подключение к БД' >> /app/start.sh && \
-    echo 'wait_for_db' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Создаем таблицы через основное приложение' >> /app/start.sh && \
-    echo 'echo "Initializing database tables..."' >> /app/start.sh && \
-    echo 'python -c "' >> /app/start.sh && \
-    echo 'from app.db.database import engine, Base' >> /app/start.sh && \
-    echo 'from app.models import models' >> /app/start.sh && \
-    echo 'try:' >> /app/start.sh && \
-    echo '    Base.metadata.create_all(bind=engine)' >> /app/start.sh && \
-    echo '    print(\"Database tables created/verified successfully!\")' >> /app/start.sh && \
-    echo 'except Exception as e:' >> /app/start.sh && \
-    echo '    print(f\"Warning during table creation: {e}\")' >> /app/start.sh && \
-    echo '"' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Запускаем приложение' >> /app/start.sh && \
-    echo 'echo "Starting FastAPI application..."' >> /app/start.sh && \
-    echo 'PORT=${PORT:-8000}' >> /app/start.sh && \
-    echo 'echo "Running on port: $PORT"' >> /app/start.sh && \
-    echo 'exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-use-colors' >> /app/start.sh && \
-    chmod +x /app/start.sh
-
-# Переменные окружения для TensorFlow
+# Переменная окружения для использования CPU вместо GPU
 ENV CUDA_VISIBLE_DEVICES="-1"
 ENV TF_FORCE_GPU_ALLOW_GROWTH="true"
 ENV TF_CPP_MIN_LOG_LEVEL="2"
 ENV PYTHONUNBUFFERED=1
+ENV DOCKER_ENV="true"
 
-# Railway устанавливает PORT автоматически
+# Установка переменной порта с значением по умолчанию
+ENV PORT=8000
+
+# Порт для FastAPI
 EXPOSE 8000
 
-# Запуск через скрипт
-CMD ["/app/start.sh"]
+# Запуск всех миграций перед запуском приложения
+# Создаем единый скрипт для запуска всех миграций с безопасной проверкой
+RUN echo '#!/bin/bash' > /app/run_migrations.sh && \
+    echo 'set -e' >> /app/run_migrations.sh && \
+    echo 'python create_tables.py' >> /app/run_migrations.sh && \
+    echo 'python add_chat_tables.py' >> /app/run_migrations.sh && \
+    echo 'python simplified_add_chat_tables.py' >> /app/run_migrations.sh && \
+    echo 'python update_user_status_fields.py' >> /app/run_migrations.sh && \
+    echo 'python create_founded_pets_table.py' >> /app/run_migrations.sh && \
+    echo 'echo "All migrations completed successfully"' >> /app/run_migrations.sh && \
+    chmod +x /app/run_migrations.sh
+
+# Запуск миграций и приложения
+CMD /app/run_migrations.sh && \
+    python -c "import os; print('Starting app with DOCKER_ENV=', os.environ.get('DOCKER_ENV'))" && \
+    uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-use-colors

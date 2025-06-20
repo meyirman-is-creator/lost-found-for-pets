@@ -1,78 +1,24 @@
-version: '3.9'
+# docker-compose.yml
+version: '3.8'
 
 services:
-  db:
-    image: postgres:14-alpine
-    container_name: lostpets_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: lostpets_db
-      PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - lostpets-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d lostpets_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: lostpets_api
-    restart: unless-stopped
+    restart: always
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      - db
+    env_file:
+      - .env
     environment:
-      # Database settings
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/lostpets_db
-      DATABASE_URL_LOCAL: postgresql://postgres:postgres@db:5432/lostpets_db
-      DOCKER_ENV: "true"
-
-      # Security settings (ОБЯЗАТЕЛЬНО изменить в продакшене!)
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
-      ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
-
-      # AWS settings (для хранения фото)
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_BUCKET_NAME: ${AWS_BUCKET_NAME:-lostpets-images}
-
-      # Email settings (для отправки писем)
-      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      EMAIL_FROM: ${EMAIL_FROM:-noreply@lostpets.com}
-
-      # Application settings
-      SIMILARITY_THRESHOLD: 0.35
-      VERIFICATION_CODE_EXPIRE_MINUTES: 15
-      
-      # Python settings
-      PYTHONUNBUFFERED: 1
-      TF_CPP_MIN_LOG_LEVEL: 2
-      CUDA_VISIBLE_DEVICES: "-1"
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/lostpets_db
+      - DOCKER_ENV=true
+      - PORT=8000
     volumes:
-      # Для разработки - монтируем код
-      - ./app:/app/app:ro
-      # Для сохранения загруженных файлов (если не используется S3)
-      - uploaded_files:/app/uploads
-      # Для логов
-      - ./logs:/app/logs
+      - ./app:/app/app
+      - ./add_chat_tables.py:/app/add_chat_tables.py  # Добавлен скрипт миграции
     networks:
       - lostpets-network
     healthcheck:
@@ -80,17 +26,31 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 40s
+
+  db:
+    image: postgres:14
+    container_name: lostpets_db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=lostpets_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lostpets-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   lostpets-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
 
 volumes:
   postgres_data:
-    driver: local
-  uploaded_files:
-    driver: local
