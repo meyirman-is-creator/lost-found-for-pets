@@ -182,7 +182,7 @@ def create_chat_and_send_first_message(
     }
 
 
-@router.get("/{chat_id}", response_model=ChatSchema)
+@router.get("/{chat_id}", response_model=ChatWithLastMessage)
 def get_chat(
         chat_id: int,
         db: Session = Depends(get_db),
@@ -201,7 +201,50 @@ def get_chat(
             detail="Not enough permissions"
         )
 
-    return chat
+    last_message = db.query(ChatMessage).filter(
+        ChatMessage.chat_id == chat.id
+    ).order_by(ChatMessage.created_at.desc()).first()
+
+    unread_count = db.query(func.count(ChatMessage.id)).filter(
+        ChatMessage.chat_id == chat.id,
+        ChatMessage.sender_id != current_user.id,
+        ChatMessage.is_read == False
+    ).scalar()
+
+    other_user_id = chat.user2_id if chat.user1_id == current_user.id else chat.user1_id
+    other_user = db.query(User).filter(User.id == other_user_id).first()
+    other_user_name = other_user.full_name if other_user else "Unknown User"
+
+    pet_photo_url = None
+    pet_name = None
+    pet_status = None
+
+    if chat.pet_id:
+        pet = db.query(Pet).filter(Pet.id == chat.pet_id).options(joinedload(Pet.photos)).first()
+        if pet:
+            pet_name = pet.name
+            pet_status = pet.status
+
+            primary_photo = next((photo for photo in pet.photos if photo.is_primary), None)
+            if primary_photo:
+                pet_photo_url = primary_photo.photo_url
+            elif pet.photos:
+                pet_photo_url = pet.photos[0].photo_url
+
+    return ChatWithLastMessage(
+        id=chat.id,
+        user1_id=chat.user1_id,
+        user2_id=chat.user2_id,
+        pet_id=chat.pet_id,
+        created_at=chat.created_at,
+        updated_at=chat.updated_at,
+        last_message=last_message,
+        unread_count=unread_count,
+        pet_photo_url=pet_photo_url,
+        pet_name=pet_name,
+        pet_status=pet_status,
+        other_user_name=other_user_name
+    )
 
 
 @router.get("/{chat_id}/messages", response_model=List[ChatMessageSchema])
