@@ -1,8 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum
-import re
 
 
 class PetStatus(str, Enum):
@@ -18,81 +17,29 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8, max_length=100)
-    full_name: str = Field(..., min_length=2, max_length=100)
-    phone: str = Field(..., min_length=10, max_length=20)
+    password: str
 
-    @field_validator('password')
-    @classmethod
-    def password_strength(cls, v: str) -> str:
+    @validator('password')
+    def password_strength(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
-        if not re.search(r'[A-Z]', v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not re.search(r'[a-z]', v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not re.search(r'[0-9]', v):
-            raise ValueError('Password must contain at least one number')
         return v
-
-    @field_validator('phone')
-    @classmethod
-    def phone_validation(cls, v: str) -> str:
-        # Remove spaces and hyphens
-        cleaned = re.sub(r'[\s\-\(\)]', '', v)
-        # Check if it starts with + and contains only digits after that
-        if not re.match(r'^\+?\d{10,15}$', cleaned):
-            raise ValueError('Invalid phone number format')
-        return cleaned
-
-    @field_validator('full_name')
-    @classmethod
-    def name_validation(cls, v: str) -> str:
-        if not v or len(v.strip()) < 2:
-            raise ValueError('Full name must be at least 2 characters long')
-        if not re.match(r'^[a-zA-Z\s\-\']+$', v):
-            raise ValueError('Full name can only contain letters, spaces, hyphens and apostrophes')
-        return v.strip()
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    phone: Optional[str] = Field(None, min_length=10, max_length=20)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
-
-    @field_validator('password')
-    @classmethod
-    def password_strength(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if not re.search(r'[A-Z]', v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not re.search(r'[a-z]', v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not re.search(r'[0-9]', v):
-            raise ValueError('Password must contain at least one number')
-        return v
-
-    @field_validator('phone')
-    @classmethod
-    def phone_validation(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        cleaned = re.sub(r'[\s\-\(\)]', '', v)
-        if not re.match(r'^\+?\d{10,15}$', cleaned):
-            raise ValueError('Invalid phone number format')
-        return cleaned
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
 
 
 class User(UserBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     is_active: bool
     is_verified: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class PetPhotoBase(BaseModel):
@@ -104,12 +51,13 @@ class PetPhotoCreate(PetPhotoBase):
 
 
 class PetPhoto(PetPhotoBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     pet_id: int
     photo_url: str
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class PetBase(BaseModel):
@@ -139,8 +87,6 @@ class PetUpdate(BaseModel):
 
 
 class Pet(PetBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     photos: List[PetPhoto] = []
     status: PetStatus
@@ -151,6 +97,9 @@ class Pet(PetBase):
     coordX: Optional[str] = None
     coordY: Optional[str] = None
     owner_phone: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 class FirstMessageCreate(BaseModel):
@@ -168,17 +117,19 @@ class PetMatchCreate(PetMatchBase):
 
 
 class PetMatch(PetMatchBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     created_at: datetime
 
+    class Config:
+        from_attributes = True
+
 
 class PetMatchWithDetails(PetMatch):
-    model_config = ConfigDict(from_attributes=True)
-
     lost_pet: Pet
     found_pet: Pet
+
+    class Config:
+        from_attributes = True
 
 
 class NotificationBase(BaseModel):
@@ -192,12 +143,13 @@ class NotificationCreate(NotificationBase):
 
 
 class Notification(NotificationBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     is_read: bool
     created_at: datetime
     match: PetMatch
+
+    class Config:
+        from_attributes = True
 
 
 class Token(BaseModel):
@@ -211,31 +163,12 @@ class TokenData(BaseModel):
 
 class Login(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=1)
-
-    @field_validator('email')
-    @classmethod
-    def email_lowercase(cls, v: str) -> str:
-        return v.lower()
+    password: str
 
 
 class VerificationRequest(BaseModel):
     email: EmailStr
-    code: str = Field(..., pattern=r'^\d{6}$')
-
-    @field_validator('email')
-    @classmethod
-    def email_lowercase(cls, v: str) -> str:
-        return v.lower()
-
-
-class ResendVerificationRequest(BaseModel):
-    email: EmailStr
-
-    @field_validator('email')
-    @classmethod
-    def email_lowercase(cls, v: str) -> str:
-        return v.lower()
+    code: str
 
 
 class FoundPetInfo(BaseModel):
@@ -248,16 +181,18 @@ class FoundPetInfo(BaseModel):
 
 
 class SimilarityResult(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     pet: Pet
     similarity_score: float
 
+    class Config:
+        from_attributes = True
+
 
 class SimilarityResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     matches: List[SimilarityResult]
+
+    class Config:
+        from_attributes = True
 
 
 class ChatMessageBase(BaseModel):
@@ -269,14 +204,15 @@ class ChatMessageCreate(ChatMessageBase):
 
 
 class ChatMessage(ChatMessageBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     chat_id: int
     sender_id: int
     whoid: Optional[int] = None
     is_read: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class ChatBase(BaseModel):
@@ -288,24 +224,26 @@ class ChatCreate(ChatBase):
 
 
 class Chat(ChatBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     user1_id: int
     user2_id: int
     created_at: datetime
     updated_at: datetime
 
+    class Config:
+        from_attributes = True
+
 
 class ChatWithLastMessage(Chat):
-    model_config = ConfigDict(from_attributes=True)
-
     last_message: Optional[ChatMessage] = None
     unread_count: int = 0
     pet_photo_url: Optional[str] = None
     pet_name: Optional[str] = None
     pet_status: Optional[PetStatus] = None
     other_user_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 class WebSocketMessage(BaseModel):
