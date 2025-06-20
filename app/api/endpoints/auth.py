@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -12,14 +12,14 @@ from app.core.security import (
 )
 from app.db.database import get_db
 from app.models.models import User, VerificationCode
-from app.schemas.schemas import UserCreate, Token, VerificationRequest, Login
+from app.schemas.schemas import UserCreate, Token, VerificationRequest, Login, ResendVerificationRequest
 from app.services.email_service import email_service
 from typing import Any
 from datetime import datetime
 from pydantic import ValidationError
 import logging
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
 
 
@@ -301,13 +301,13 @@ def login(login_data: Login, db: Session = Depends(get_db)) -> Any:
 
 
 @router.post("/resend-verification", response_model=dict)
-def resend_verification(email: str, db: Session = Depends(get_db)) -> Any:
+def resend_verification(request: ResendVerificationRequest, db: Session = Depends(get_db)) -> Any:
     """
     Resend verification code
     """
     try:
         # Normalize email
-        email = email.lower().strip()
+        email = request.email.lower().strip()
 
         user = db.query(User).filter(User.email == email).first()
         if not user:
