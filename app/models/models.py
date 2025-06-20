@@ -1,4 +1,3 @@
-# app/models/models.py
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, Enum, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -150,9 +149,11 @@ class ChatMessage(Base):
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(Integer, ForeignKey("chats.id"), nullable=False)
     sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    whoid = Column(Integer, ForeignKey("users.id"), nullable=False)
     content = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
 
     chat = relationship("Chat", back_populates="messages")
-    sender = relationship("User")
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[whoid])

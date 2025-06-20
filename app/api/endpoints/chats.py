@@ -46,7 +46,7 @@ def get_user_chats(
 
             unread_count = db.query(func.count(ChatMessage.id)).filter(
                 ChatMessage.chat_id == chat.id,
-                ChatMessage.sender_id != current_user.id,
+                ChatMessage.whoid == current_user.id,
                 ChatMessage.is_read == False
             ).scalar()
 
@@ -219,6 +219,7 @@ def create_chat_and_send_first_message(
         message = ChatMessage(
             chat_id=chat.id,
             sender_id=current_user.id,
+            whoid=pet.owner_id,
             content=message_data.message,
             is_read=False
         )
@@ -341,26 +342,22 @@ def get_chat_messages(
         logger.info(f"Found {len(messages)} messages in chat {chat_id}")
 
         for i, message in enumerate(messages):
-            # ВАЖНО: whoid - это ID текущего пользователя (для iOS)
-            setattr(message, 'whoid', current_user.id)
-
             sender = db.query(User).filter(User.id == message.sender_id).first()
             if sender:
                 setattr(message, 'sender_name', sender.full_name if sender.full_name else f"User {sender.id}")
 
-                # Подробный лог каждого сообщения
                 is_my_message = message.sender_id == current_user.id
                 logger.info(f"Message {i + 1}/{len(messages)}:")
                 logger.info(f"  ID: {message.id}")
                 logger.info(f"  Sender: {message.sender_id} ({sender.email}) {'[ME]' if is_my_message else '[OTHER]'}")
+                logger.info(f"  Receiver (whoid): {message.whoid}")
                 logger.info(f"  Content: '{message.content}'")
                 logger.info(f"  Read: {message.is_read}")
                 logger.info(f"  Created: {message.created_at}")
 
-        # Mark messages as read
         unread_count = db.query(ChatMessage).filter(
             ChatMessage.chat_id == chat_id,
-            ChatMessage.sender_id != current_user.id,
+            ChatMessage.whoid == current_user.id,
             ChatMessage.is_read == False
         ).count()
 
@@ -368,7 +365,7 @@ def get_chat_messages(
             logger.info(f"Marking {unread_count} messages as read in chat {chat_id}")
             db.query(ChatMessage).filter(
                 ChatMessage.chat_id == chat_id,
-                ChatMessage.sender_id != current_user.id,
+                ChatMessage.whoid == current_user.id,
                 ChatMessage.is_read == False
             ).update({"is_read": True})
             db.commit()
@@ -407,7 +404,6 @@ def delete_chat(
                 detail="Not enough permissions"
             )
 
-        # Get message count before deletion for logging
         message_count = db.query(ChatMessage).filter(ChatMessage.chat_id == chat_id).count()
         logger.info(f"Deleting chat {chat_id} with {message_count} messages")
 

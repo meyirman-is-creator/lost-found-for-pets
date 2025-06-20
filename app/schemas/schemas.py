@@ -207,7 +207,7 @@ class ChatMessage(ChatMessageBase):
     id: int
     chat_id: int
     sender_id: int
-    whoid: Optional[int] = None
+    whoid: int
     is_read: bool
     created_at: datetime
     sender_name: Optional[str] = None

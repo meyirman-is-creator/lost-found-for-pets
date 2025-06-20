@@ -28,7 +28,6 @@ user_status: Dict[int, Dict[str, Any]] = {}
 
 
 async def update_user_status(db: Session, user_id: int, is_online: bool):
-    """Обновляет статус пользователя в базе данных"""
     logger.info(f"=== UPDATING USER STATUS ===")
     logger.info(f"User ID: {user_id}, Online: {is_online}")
 
@@ -48,7 +47,6 @@ async def update_user_status(db: Session, user_id: int, is_online: bool):
 
 
 async def broadcast_user_status(user_id: int, is_online: bool, last_active_at: Optional[datetime] = None):
-    """Отправляет статус пользователя всем его собеседникам"""
     logger.info(f"=== BROADCASTING USER STATUS ===")
     logger.info(f"User ID: {user_id}, Broadcasting: {'ONLINE' if is_online else 'OFFLINE'}")
 
@@ -85,14 +83,13 @@ async def broadcast_user_status(user_id: int, is_online: bool, last_active_at: O
 
 
 async def mark_messages_as_read(db: Session, chat_id: int, user_id: int):
-    """Отмечает все сообщения как прочитанные и отправляет уведомления"""
     logger.info(f"=== MARKING MESSAGES AS READ ===")
     logger.info(f"Chat ID: {chat_id}, User ID: {user_id}")
 
     try:
         unread_messages = db.query(ChatMessage).filter(
             ChatMessage.chat_id == chat_id,
-            ChatMessage.sender_id != user_id,
+            ChatMessage.whoid == user_id,
             ChatMessage.is_read == False
         ).all()
 
@@ -143,9 +140,6 @@ async def websocket_endpoint(
         chat_id: int,
         token: str = Query(...)
 ):
-    """
-    WebSocket endpoint для чата
-    """
     logger.info(f"=== WEBSOCKET CONNECTION ATTEMPT ===")
     logger.info(f"Chat ID: {chat_id}")
     logger.info(f"Token: {token[:20]}..." if len(token) > 20 else f"Token: {token}")
@@ -154,7 +148,6 @@ async def websocket_endpoint(
     current_user = None
 
     try:
-        # Аутентификация пользователя по токену
         try:
             current_user = await get_current_user_from_token(token, db)
             logger.info(
@@ -164,7 +157,6 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        # Проверка прав доступа к чату
         chat = db.query(Chat).filter(Chat.id == chat_id).first()
         if not chat:
             logger.warning(f"❌ Chat {chat_id} not found")
@@ -178,12 +170,10 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        # Принимаем соединение
         await websocket.accept()
         logger.info(
             f"✅ WebSocket connection accepted for user {current_user.id} ({current_user.email}) in chat {chat_id}")
 
-        # Инициализируем структуры данных
         if chat_id not in active_connections:
             active_connections[chat_id] = {}
             logger.debug(f"Created new connection dict for chat {chat_id}")
@@ -192,18 +182,14 @@ async def websocket_endpoint(
             typing_users[chat_id] = set()
             logger.debug(f"Created new typing users set for chat {chat_id}")
 
-        # Добавляем соединение
         active_connections[chat_id][current_user.id] = websocket
         logger.info(f"Added connection. Chat {chat_id} now has {len(active_connections[chat_id])} active connections")
 
-        # Обновляем статус пользователя
         await update_user_status(db, current_user.id, True)
         await broadcast_user_status(current_user.id, True)
 
-        # Отмечаем сообщения как прочитанные
         await mark_messages_as_read(db, chat_id, current_user.id)
 
-        # Отправляем информацию о статусе собеседника
         other_user_id = chat.user1_id if chat.user1_id != current_user.id else chat.user2_id
         logger.debug(f"Other user in chat: {other_user_id}")
 
@@ -222,12 +208,10 @@ async def websocket_endpoint(
             logger.debug(f"Sending initial status: {status_json}")
             await websocket.send_text(status_json)
 
-        # Отправляем сообщение о успешном подключении
         success_message = json.dumps({"message": "Connection established successfully", "type": "system"})
         logger.debug(f"Sending success message: {success_message}")
         await websocket.send_text(success_message)
 
-        # Основной цикл обработки сообщений
         while True:
             data = await websocket.receive_text()
             logger.info(f"=== 📨 RECEIVED WEBSOCKET MESSAGE ===")
@@ -245,10 +229,8 @@ async def websocket_endpoint(
                 message_type = message_data.get("message_type", MessageType.TEXT)
                 logger.info(f"Message type: {message_type}")
 
-                # Обновляем время активности пользователя
                 await update_user_status(db, current_user.id, True)
 
-                # Обработка текстовых сообщений
                 if message_type == MessageType.TEXT or "content" in message_data:
                     content = message_data.get("content", "").strip()
                     logger.info(f"📝 TEXT MESSAGE from {current_user.email}: '{content}'")
@@ -258,10 +240,10 @@ async def websocket_endpoint(
                         continue
 
                     try:
-                        # ВАЖНО: sender_id всегда берем из токена, а не из сообщения!
                         new_message = ChatMessage(
                             chat_id=chat_id,
-                            sender_id=current_user.id,  # Всегда используем ID из токена!
+                            sender_id=current_user.id,
+                            whoid=other_user_id,
                             content=content,
                             is_read=False
                         )
@@ -271,29 +253,26 @@ async def websocket_endpoint(
                         logger.info(f"✅ Message saved to DB:")
                         logger.info(f"   ID: {new_message.id}")
                         logger.info(f"   Sender: {current_user.id} ({current_user.email})")
+                        logger.info(f"   Receiver (whoid): {other_user_id}")
                         logger.info(f"   Content: '{content}'")
                         logger.info(f"   Chat: {chat_id}")
 
-                        # Обновляем время последней активности чата
                         chat.updated_at = datetime.utcnow()
                         db.add(chat)
                         db.commit()
 
-                        # Удаляем пользователя из списка печатающих
                         if current_user.id in typing_users.get(chat_id, set()):
                             typing_users[chat_id].remove(current_user.id)
                             logger.debug(f"Removed {current_user.email} from typing list")
 
-                        # Получаем информацию об отправителе
                         sender_name = current_user.full_name if current_user.full_name else f"User {current_user.id}"
 
-                        # Создаем ответ для отправки
                         response = {
                             "message_id": new_message.id,
                             "content": new_message.content,
                             "chat_id": new_message.chat_id,
                             "sender_id": new_message.sender_id,
-                            "whoid": current_user.id,  # Для совместимости с iOS
+                            "whoid": new_message.whoid,
                             "is_read": new_message.is_read,
                             "created_at": new_message.created_at,
                             "sender_name": sender_name,
@@ -303,12 +282,10 @@ async def websocket_endpoint(
                         response_json = json.dumps(response, cls=DateTimeEncoder)
                         logger.info(f"📤 Broadcasting message to all users in chat {chat_id}")
 
-                        # Отправляем сообщение всем участникам чата
                         broadcast_results = []
                         for user_id, conn in active_connections.get(chat_id, {}).items():
                             try:
-                                # Если получатель онлайн и это не отправитель
-                                if user_id != current_user.id:
+                                if user_id == other_user_id:
                                     new_message.is_read = True
                                     db.add(new_message)
                                     db.commit()
@@ -332,12 +309,10 @@ async def websocket_endpoint(
                         })
                         await websocket.send_text(error_message)
 
-                # Обработка начала набора сообщения
                 elif message_type == MessageType.TYPING_STARTED:
                     logger.info(f"⌨️ {current_user.email} STARTED TYPING")
                     typing_users[chat_id].add(current_user.id)
 
-                    # Уведомляем других участников
                     for user_id, conn in active_connections.get(chat_id, {}).items():
                         if user_id != current_user.id:
                             typing_notification = WebSocketStatusResponse(
@@ -351,13 +326,11 @@ async def websocket_endpoint(
                             except Exception as e:
                                 logger.error(f"❌ Error sending typing notification: {e}")
 
-                # Обработка окончания набора сообщения
                 elif message_type == MessageType.TYPING_ENDED:
                     logger.info(f"⌨️ {current_user.email} STOPPED TYPING")
                     if current_user.id in typing_users.get(chat_id, set()):
                         typing_users[chat_id].remove(current_user.id)
 
-                    # Уведомляем других участников
                     for user_id, conn in active_connections.get(chat_id, {}).items():
                         if user_id != current_user.id:
                             typing_notification = WebSocketStatusResponse(
@@ -371,7 +344,6 @@ async def websocket_endpoint(
                             except Exception as e:
                                 logger.error(f"❌ Error sending typing notification: {e}")
 
-                # Обработка прочтения сообщения
                 elif message_type == MessageType.MESSAGE_READ:
                     message_id = message_data.get("message_id")
                     logger.info(f"👁️ {current_user.email} marking message {message_id} as READ")
@@ -390,7 +362,6 @@ async def websocket_endpoint(
                                 db.commit()
                                 logger.info(f"✅ Message {message_id} marked as read in DB")
 
-                                # Уведомляем отправителя о прочтении
                                 if message.sender_id in active_connections.get(chat_id, {}):
                                     read_notification = WebSocketStatusResponse(
                                         user_id=current_user.id,
@@ -424,16 +395,13 @@ async def websocket_endpoint(
         logger.error(f"❌ Unexpected WebSocket error: {e}", exc_info=True)
 
     finally:
-        # Очистка и обработка отключения
         if current_user:
             logger.info(f"=== 🧹 CLEANING UP CONNECTION ===")
             logger.info(f"User: {current_user.id} ({current_user.email}), Chat: {chat_id}")
 
-            # Обновляем статус пользователя
             await update_user_status(db, current_user.id, False)
             await broadcast_user_status(current_user.id, False)
 
-            # Удаляем соединение
             if chat_id in active_connections and current_user.id in active_connections[chat_id]:
                 del active_connections[chat_id][current_user.id]
                 logger.info(
@@ -443,7 +411,6 @@ async def websocket_endpoint(
                     del active_connections[chat_id]
                     logger.info(f"Removed empty chat {chat_id} from active connections")
 
-            # Удаляем из списка печатающих
             if chat_id in typing_users and current_user.id in typing_users[chat_id]:
                 typing_users[chat_id].remove(current_user.id)
                 logger.debug(f"Removed user from typing list")
@@ -452,6 +419,5 @@ async def websocket_endpoint(
                     del typing_users[chat_id]
                     logger.debug(f"Removed empty typing users set for chat {chat_id}")
 
-        # Закрываем сессию базы данных
         db.close()
         logger.info("✅ Database session closed")
