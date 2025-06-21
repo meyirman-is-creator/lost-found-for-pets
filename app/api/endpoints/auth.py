@@ -12,7 +12,7 @@ from app.core.security import (
 )
 from app.db.database import get_db
 from app.models.models import User, VerificationCode
-from app.schemas.schemas import UserCreate, Token, VerificationRequest, Login
+from app.schemas.schemas import UserCreate, Token, VerificationRequest, Login, TokenWithUser
 from app.services.email_service import email_service
 from typing import Any
 from datetime import datetime
@@ -22,10 +22,6 @@ router = APIRouter()
 
 @router.post("/register", response_model=dict)
 def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
-    """
-    Register a new user
-    """
-    # Check if user already exists
     db_user = db.query(User).filter(User.email == user_in.email).first()
     if db_user:
         raise HTTPException(
@@ -33,7 +29,6 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
             detail="Email already registered"
         )
 
-    # Create new user
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         email=user_in.email,
@@ -47,11 +42,9 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     db.commit()
     db.refresh(db_user)
 
-    # Generate verification code
     verification_code = generate_verification_code()
     expires_at = create_verification_token_expiry()
 
-    # Save verification code to database
     db_verification = VerificationCode(
         user_id=db_user.id,
         code=verification_code,
@@ -60,7 +53,6 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     db.add(db_verification)
     db.commit()
 
-    # Send verification email
     email_service.send_verification_email(db_user.email, verification_code)
 
     return {"message": "User registered successfully. Please check your email for verification code."}
@@ -68,10 +60,6 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
 
 @router.post("/verify", response_model=dict)
 def verify_email(verification_data: VerificationRequest, db: Session = Depends(get_db)) -> Any:
-    """
-    Verify user email with code
-    """
-    # Find user by email
     user = db.query(User).filter(User.email == verification_data.email).first()
     if not user:
         raise HTTPException(
@@ -79,7 +67,6 @@ def verify_email(verification_data: VerificationRequest, db: Session = Depends(g
             detail="User not found"
         )
 
-    # Find verification code
     verification = (
         db.query(VerificationCode)
         .filter(
@@ -97,10 +84,7 @@ def verify_email(verification_data: VerificationRequest, db: Session = Depends(g
             detail="Invalid or expired verification code"
         )
 
-    # Mark user as verified
     user.is_verified = True
-
-    # Mark verification code as used
     verification.is_used = True
 
     db.commit()
@@ -108,11 +92,8 @@ def verify_email(verification_data: VerificationRequest, db: Session = Depends(g
     return {"message": "Email verified successfully"}
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=TokenWithUser)
 def login(login_data: Login, db: Session = Depends(get_db)) -> Any:
-    """
-    Login with email and password, get an access token for future requests
-    """
     user = db.query(User).filter(User.email == login_data.email).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(
@@ -126,14 +107,11 @@ def login(login_data: Login, db: Session = Depends(get_db)) -> Any:
         data={"sub": user.email}, expires_delta=access_token_expires
     )
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id}
 
 
 @router.post("/resend-verification", response_model=dict)
 def resend_verification(email: str, db: Session = Depends(get_db)) -> Any:
-    """
-    Resend verification code
-    """
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
@@ -147,11 +125,9 @@ def resend_verification(email: str, db: Session = Depends(get_db)) -> Any:
             detail="User already verified"
         )
 
-    # Generate new verification code
     verification_code = generate_verification_code()
     expires_at = create_verification_token_expiry()
 
-    # Save verification code to database
     db_verification = VerificationCode(
         user_id=user.id,
         code=verification_code,
@@ -160,7 +136,6 @@ def resend_verification(email: str, db: Session = Depends(get_db)) -> Any:
     db.add(db_verification)
     db.commit()
 
-    # Send verification email
     email_service.send_verification_email(user.email, verification_code)
 
     return {"message": "Verification code sent successfully"}
